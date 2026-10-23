@@ -2,7 +2,7 @@
 
 自建 Calibre 服务的 Android 客户端。**calibre-server（官方内容服务器）与 Calibre-Web 双兼容**，全部走 OPDS 1.2 协议，不硬编码任何服务端路由；内置 Readium 阅读器，不再依赖第三方阅读 App。
 
-## 已实现（v0.2.0）
+## 已实现（v0.3.0）
 
 | 模块 | 说明 |
 |---|---|
@@ -16,6 +16,24 @@
 | 书架 | Room 持久化、进度条、文件丢失检测、删除确认 |
 | **内置阅读器** | Readium 3.1.2 渲染 EPUB / KEPUB；左右翻页或滚动模式；目录跳转；字号、行距、衬线/无衬线、白底/护眼/夜间主题实时生效 |
 | **进度同步** | Calibre-Web Kobo 协议双向同步（拉取 + 推送），calibre-server 自动降级为本地保存 |
+| **检查更新** | GitHub Releases 版本检查（启动静默 + 手动）、APK 下载、拉起系统安装器、未知来源授权跳转与返回续装 |
+
+## 应用内更新
+
+版本来源于本仓库的 GitHub Releases。启动时静默检查一次（12 小时节流），服务器页底部「关于」卡片可随时手动检查。
+
+```
+GitHub Releases (latest)
+   ↓ tag_name 与 BuildConfig.VERSION_NAME 做语义化比较
+有新版 → 下载 APK 到 cacheDir/update（.part 保护）
+   ↓ FileProvider（cache-path）
+系统安装器 → 覆盖安装
+```
+
+发版流程：改 `app/build.gradle.kts` 的 `versionCode` / `versionName` → 构建 → 上传 APK 到新 tag 的 Release。**不发布 Release，客户端就永远认为已是最新。**
+
+> 检查更新使用独立的 `OkHttpClient`（`AppContainer.updateClient`），不带任何认证拦截器。切勿改成复用 `opdsClient` —— 会把 Calibre 服务器账号密码作为 Basic 头发给 `api.github.com`。
+
 
 ## 阅读器
 
@@ -108,3 +126,5 @@ app/src/main/java/com/lichong/calibrereader/
 - 进度同步仅 Calibre-Web（需 Kobo 令牌），不支持官方 calibre-server
 - 阅读偏好为全局共享，不按书单独记忆
 - 未做真机验证（开发环境无连接设备）
+- 自更新依赖 GitHub 可达；GitHub API 匿名限流 60 次/小时（12h 节流远低于此）
+- Debug 签名，仅自用。若换正式签名，必须先在设备上卸载旧版，否则安装器会拒绝覆盖
