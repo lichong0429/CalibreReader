@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 打开的书本 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42 C47,35 38,32 28,32 L28,72 C38,72 47,75 54,82 C61,75 70,72 80,72 L80,32 C70,32 61,35 54,42 Z" />
+    <path
+        android:fillColor="#FF1B4B5A"
+        android:pathData="M53,45 L55,45 L55,80 L53,80 Z" />
+    <path
+        android:fillColor="#FF1B4B5A"
+        android:pathData="M34,42 L48,44 L48,47 L34,45 Z" />
+    <path
+        android:fillColor="#FF1B4B5A"
+        android:pathData="M34,50 L48,52 L48,55 L34,53 Z" />
+    <path
+        android:fillColor="#FF1B4B5A"
+        android:pathData="M60,44 L74,42 L74,45 L60,47 Z" />
+    <path
+        android:fillColor="#FF1B4B5A"
+        android:pathData="M60,52 L74,50 L74,53 L60,55 Z" />
+</vector>
