@@ -21,6 +21,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -32,6 +34,8 @@ import com.lichong.calibrereader.ui.browse.BrowseViewModel
 import com.lichong.calibrereader.ui.library.LibraryScreen
 import com.lichong.calibrereader.ui.library.LibraryViewModel
 import com.lichong.calibrereader.ui.server.ServerListScreen
+import com.lichong.calibrereader.ui.update.UpdatePromptDialog
+import com.lichong.calibrereader.ui.update.UpdateViewModel
 import kotlinx.coroutines.launch
 
 private const val TAB_BROWSE = 0
@@ -55,6 +59,24 @@ fun AppRoot(container: AppContainer) {
     )
     val libraryItems by libraryVm.items.collectAsStateWithLifecycle()
     val libraryMessage by libraryVm.message.collectAsStateWithLifecycle()
+
+    val updateVm: UpdateViewModel = viewModel(
+        factory = viewModelFactory { initializer { UpdateViewModel(container) } }
+    )
+    val updateState by updateVm.state.collectAsStateWithLifecycle()
+
+    // 启动静默检查（12h 节流，只有发现新版才弹窗）
+    LaunchedEffect(Unit) { updateVm.checkSilent() }
+    // 从「安装未知应用」授权页返回后继续安装
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { updateVm.retryInstall() }
+
+    if (updateState.promptVisible) {
+        UpdatePromptDialog(
+            state = updateState,
+            onDismiss = updateVm::dismissPrompt,
+            onUpdate = updateVm::download
+        )
+    }
 
     val effectiveTab = if (servers.isEmpty()) TAB_SERVERS else tab
 
@@ -117,6 +139,10 @@ fun AppRoot(container: AppContainer) {
                     servers = servers,
                     activeId = active?.id,
                     showBack = false,
+                    updateState = updateState,
+                    onCheckUpdate = updateVm::checkManual,
+                    onDownloadUpdate = updateVm::download,
+                    onRetryInstall = updateVm::retryInstall,
                     onBack = {},
                     onUse = { cfg: ServerConfig ->
                         scope.launch { container.serverStore.setActive(cfg.id) }

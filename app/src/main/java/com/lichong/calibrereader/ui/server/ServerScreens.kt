@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -63,6 +64,8 @@ import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.net.ProbeResult
 import com.lichong.calibrereader.data.net.ServerProbe
 import com.lichong.calibrereader.ui.MessageState
+import com.lichong.calibrereader.ui.update.AboutCard
+import com.lichong.calibrereader.ui.update.UpdateUiState
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,6 +75,10 @@ fun ServerListScreen(
     servers: List<ServerConfig>,
     activeId: String?,
     showBack: Boolean,
+    updateState: UpdateUiState,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onRetryInstall: () -> Unit,
     onBack: () -> Unit,
     onUse: (ServerConfig) -> Unit
 ) {
@@ -102,13 +109,23 @@ fun ServerListScreen(
         }
     ) { padding ->
         if (servers.isEmpty()) {
-            Column(Modifier.padding(padding).fillMaxWidth()) {
-                MessageState(
-                    title = "还没有添加 Calibre 服务器",
-                    detail = "支持 calibre-server（官方内容服务器）与 Calibre-Web。\n填写地址后会自动探测 OPDS 入口，无需手动输入 /opds。",
-                    actionText = "添加服务器",
-                    onAction = { creating = true }
-                )
+            Column(Modifier.padding(padding).fillMaxSize()) {
+                Box(Modifier.weight(1f)) {
+                    MessageState(
+                        title = "还没有添加 Calibre 服务器",
+                        detail = "支持 calibre-server（官方内容服务器）与 Calibre-Web。\n填写地址后会自动探测 OPDS 入口，无需手动输入 /opds。",
+                        actionText = "添加服务器",
+                        onAction = { creating = true }
+                    )
+                }
+                Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    AboutCard(
+                        state = updateState,
+                        onCheck = onCheckUpdate,
+                        onDownload = onDownloadUpdate,
+                        onRetryInstall = onRetryInstall
+                    )
+                }
             }
         } else {
             LazyColumn(
@@ -123,6 +140,15 @@ fun ServerListScreen(
                         onClick = { onUse(s) },
                         onEdit = { editing = s },
                         onDelete = { pendingDelete = s }
+                    )
+                }
+                item {
+                    Spacer(Modifier.height(4.dp))
+                    AboutCard(
+                        state = updateState,
+                        onCheck = onCheckUpdate,
+                        onDownload = onDownloadUpdate,
+                        onRetryInstall = onRetryInstall
                     )
                 }
             }
