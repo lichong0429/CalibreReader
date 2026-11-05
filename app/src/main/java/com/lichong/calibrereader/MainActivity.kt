@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lichong.calibrereader.ui.AppRoot
 import com.lichong.calibrereader.ui.theme.CalibreTheme
 
@@ -14,7 +16,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val container = (application as CalibreApp).container
         setContent {
-            CalibreTheme {
+            val settings by container.themePrefs.settings.collectAsStateWithLifecycle()
+            CalibreTheme(palette = settings.palette, mode = settings.mode) {
                 AppRoot(container)
             }
         }

@@ -1,8 +1,13 @@
 package com.lichong.calibrereader.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -11,14 +16,19 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.Image
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import com.lichong.calibrereader.CalibreApp
 
 /**
- * 带认证的封面图。无封面 / 加载中时显示书名首字占位。
+ * 带认证的封面图。无封面 / 加载中时用品牌渐变 + 书脊线做占位，
+ * 而不是一块平涂色，书库网格整体会整齐很多。
  */
 @Composable
 fun RemoteCover(
@@ -53,14 +63,42 @@ fun RemoteCover(
             modifier = modifier
         )
     } else {
+        val scheme = MaterialTheme.colorScheme
         Box(
-            modifier = modifier.background(MaterialTheme.colorScheme.primaryContainer),
+            modifier = modifier.background(
+                Brush.linearGradient(
+                    listOf(
+                        scheme.primary.copy(alpha = 0.82f),
+                        scheme.primaryContainer
+                    )
+                )
+            ),
             contentAlignment = Alignment.Center
         ) {
+            // 书脊
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(4.dp)
+                    .background(Color.White.copy(alpha = 0.24f))
+            )
+            // 书页装饰线
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = 0.28f))
+            )
             Text(
                 fallbackText.trim().take(2),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                fontWeight = FontWeight.Bold,
+                color = scheme.onPrimaryContainer,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
         }
     }

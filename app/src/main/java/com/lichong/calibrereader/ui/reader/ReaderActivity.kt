@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.fragment.app.commit
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.lichong.calibrereader.CalibreApp
 import com.lichong.calibrereader.R
@@ -100,7 +101,9 @@ class ReaderActivity : AppCompatActivity() {
         ui = ui.copy(prefs = prefs)
 
         setContent {
-            CalibreTheme {
+            val settings by (application as CalibreApp).container.themePrefs.settings
+                .collectAsStateWithLifecycle()
+            CalibreTheme(palette = settings.palette, mode = settings.mode) {
                 ReaderScreen(
                     state = ui,
                     onBack = { finish() },

@@ -68,6 +68,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +85,7 @@ import com.lichong.calibrereader.ui.MessageState
 import com.lichong.calibrereader.ui.SectionTitle
 import com.lichong.calibrereader.ui.components.RemoteCover
 import com.lichong.calibrereader.ui.formatSize
+import com.lichong.calibrereader.ui.theme.AppButtonShape
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -385,6 +387,7 @@ private fun QuickLinksRow(
             entries.take(8).forEach { entry ->
                 AssistChip(
                     onClick = { onOpen(entry) },
+                    shape = RoundedCornerShape(12.dp),
                     label = {
                         Text(
                             entry.title,
@@ -408,11 +411,11 @@ private fun BookGrid(
     val navEntries = state.entries.filter { it.isNavigation }
     val bookEntries = state.entries.filterNot { it.isNavigation }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 108.dp),
+        columns = GridCells.Adaptive(minSize = 112.dp),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 28.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         if (navEntries.isNotEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -460,11 +463,16 @@ private fun LoadMoreRow(loading: Boolean, nextUrl: String?, onLoadMore: () -> Un
 
 @Composable
 private fun BookCard(entry: OpdsEntry, onClick: () -> Unit) {
-    Column(Modifier.clickable(onClick = onClick)) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+    ) {
         Card(
-            shape = RoundedCornerShape(10.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            shape = RoundedCornerShape(14.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
         ) {
             Box(Modifier.fillMaxWidth().aspectRatio(0.68f)) {
                 RemoteCover(
@@ -475,15 +483,17 @@ private fun BookCard(entry: OpdsEntry, onClick: () -> Unit) {
                 )
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             entry.title,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
         if (entry.authors.isNotEmpty()) {
+            Spacer(Modifier.height(2.dp))
             Text(
                 entry.authorLine,
                 style = MaterialTheme.typography.labelSmall,
@@ -506,7 +516,11 @@ private fun BookDetailSheet(
     onOpenFile: (String) -> Unit,
     onResetDownload: () -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -516,7 +530,7 @@ private fun BookDetailSheet(
         ) {
             Row {
                 Card(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Box(Modifier.width(96.dp).aspectRatio(0.68f)) {
@@ -580,7 +594,8 @@ private fun BookDetailSheet(
                 Button(
                     onClick = onQuickRead,
                     enabled = download !is DownloadState.Running,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = AppButtonShape,
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
                 ) { Text("一键阅读") }
                 Spacer(Modifier.height(6.dp))
                 Text(

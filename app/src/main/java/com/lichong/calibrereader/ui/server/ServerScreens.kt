@@ -59,12 +59,15 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lichong.calibrereader.AppContainer
 import com.lichong.calibrereader.BuildConfig
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.net.ProbeResult
 import com.lichong.calibrereader.data.net.ServerProbe
 import com.lichong.calibrereader.ui.MessageState
+import com.lichong.calibrereader.ui.theme.AppearanceCard
+import com.lichong.calibrereader.ui.theme.AppCardShape
 import com.lichong.calibrereader.ui.update.AboutCard
 import com.lichong.calibrereader.ui.update.UpdateUiState
 import kotlinx.coroutines.CancellationException
@@ -91,6 +94,7 @@ fun ServerListScreen(
     var editing by remember { mutableStateOf<ServerConfig?>(null) }
     var pendingDelete by remember { mutableStateOf<ServerConfig?>(null) }
     val scope = rememberCoroutineScope()
+    val themeSettings by container.themePrefs.settings.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -131,7 +135,14 @@ fun ServerListScreen(
                         onAction = { creating = true }
                     )
                 }
-                Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    AppearanceCard(
+                        settings = themeSettings,
+                        onPalette = container.themePrefs::setPalette,
+                        onMode = container.themePrefs::setMode
+                    )
+                }
+                Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                     AboutCard(
                         state = updateState,
                         onCheck = onCheckUpdate,
@@ -153,6 +164,14 @@ fun ServerListScreen(
                         onClick = { onUse(s) },
                         onEdit = { editing = s },
                         onDelete = { pendingDelete = s }
+                    )
+                }
+                item {
+                    Spacer(Modifier.height(4.dp))
+                    AppearanceCard(
+                        settings = themeSettings,
+                        onPalette = container.themePrefs::setPalette,
+                        onMode = container.themePrefs::setMode
                     )
                 }
                 item {
@@ -219,6 +238,8 @@ private fun ServerCard(
 
     Card(
         onClick = onClick,
+        shape = AppCardShape,
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer
             else MaterialTheme.colorScheme.surface

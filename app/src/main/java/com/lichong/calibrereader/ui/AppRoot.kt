@@ -1,5 +1,6 @@
 package com.lichong.calibrereader.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -23,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -42,6 +45,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -60,6 +66,8 @@ import com.lichong.calibrereader.ui.library.LibraryScreen
 import com.lichong.calibrereader.ui.library.LibraryViewModel
 import com.lichong.calibrereader.ui.server.ServerEditDialog
 import com.lichong.calibrereader.ui.server.ServerListScreen
+import com.lichong.calibrereader.ui.theme.AppButtonShape
+import com.lichong.calibrereader.ui.theme.AppCardShape
 import com.lichong.calibrereader.ui.update.UpdatePromptDialog
 import com.lichong.calibrereader.ui.update.UpdateViewModel
 import kotlinx.coroutines.flow.combine
@@ -133,25 +141,34 @@ fun AppRoot(container: AppContainer) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = tab == TAB_BROWSE,
-                    onClick = { tab = TAB_BROWSE },
-                    icon = { Icon(Icons.Default.List, contentDescription = null) },
-                    label = { Text("书库") }
+            Column {
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
                 )
-                NavigationBarItem(
-                    selected = tab == TAB_LIBRARY,
-                    onClick = { tab = TAB_LIBRARY },
-                    icon = { Icon(Icons.Default.Star, contentDescription = null) },
-                    label = { Text("书架") }
-                )
-                NavigationBarItem(
-                    selected = tab == TAB_SETTINGS,
-                    onClick = { tab = TAB_SETTINGS },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                    label = { Text("设置") }
-                )
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp
+                ) {
+                    NavigationBarItem(
+                        selected = tab == TAB_BROWSE,
+                        onClick = { tab = TAB_BROWSE },
+                        icon = { Icon(Icons.Default.List, contentDescription = null) },
+                        label = { Text("书库") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == TAB_LIBRARY,
+                        onClick = { tab = TAB_LIBRARY },
+                        icon = { Icon(Icons.Default.Star, contentDescription = null) },
+                        label = { Text("书架") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == TAB_SETTINGS,
+                        onClick = { tab = TAB_SETTINGS },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        label = { Text("设置") }
+                    )
+                }
             }
         }
     ) { padding ->
@@ -255,20 +272,7 @@ private fun ConnectLibraryScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Surface(
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(76.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.List,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(38.dp)
-                    )
-                }
-            }
+            BrandIllustration(Modifier.size(88.dp))
             Spacer(Modifier.height(22.dp))
             Text(
                 "把书库装进口袋",
@@ -287,8 +291,10 @@ private fun ConnectLibraryScreen(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
+                shape = AppCardShape,
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
             ) {
                 Column(Modifier.padding(16.dp)) {
@@ -310,7 +316,8 @@ private fun ConnectLibraryScreen(
             Spacer(Modifier.height(24.dp))
             Button(
                 onClick = onAdd,
-                modifier = Modifier.fillMaxWidth()
+                shape = AppButtonShape,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
@@ -330,6 +337,48 @@ private fun ConnectLibraryScreen(
             )
             Spacer(Modifier.height(16.dp))
         }
+    }
+}
+
+/** 引导页品牌插画：渐变底 + 错落书脊，比一枚默认图标更有产品感。 */
+@Composable
+private fun BrandIllustration(modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(28.dp))
+            .background(Brush.linearGradient(listOf(scheme.primary, scheme.secondary))),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.padding(bottom = 22.dp)
+        ) {
+            Spacer(
+                Modifier.size(11.dp, 30.dp).clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.45f))
+            )
+            Spacer(
+                Modifier.size(13.dp, 44.dp).clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.90f))
+            )
+            Spacer(
+                Modifier.size(11.dp, 36.dp).clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.62f))
+            )
+            Spacer(
+                Modifier.size(9.dp, 26.dp).clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.38f))
+            )
+        }
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(3.dp)
+                .background(Color.White.copy(alpha = 0.32f))
+        )
     }
 }
 

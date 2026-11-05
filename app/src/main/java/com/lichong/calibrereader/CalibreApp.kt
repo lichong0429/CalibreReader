@@ -9,6 +9,7 @@ import com.lichong.calibrereader.data.image.CoverLoader
 import com.lichong.calibrereader.data.net.OpdsClient
 import com.lichong.calibrereader.data.net.ServerProbe
 import com.lichong.calibrereader.data.prefs.ServerStore
+import com.lichong.calibrereader.data.prefs.ThemePrefs
 import com.lichong.calibrereader.data.reader.PublicationLoader
 import com.lichong.calibrereader.data.sync.ProgressSync
 import com.lichong.calibrereader.data.update.UpdateChecker
@@ -27,6 +28,7 @@ class AppContainer(private val app: Application) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val serverStore = ServerStore(app)
+    val themePrefs = ThemePrefs(app)
 
     val database = AppDatabase.build(app)
 

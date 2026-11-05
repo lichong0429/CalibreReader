@@ -41,12 +41,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lichong.calibrereader.ui.MessageState
 import com.lichong.calibrereader.ui.components.RemoteCover
 import com.lichong.calibrereader.ui.formatSize
+import com.lichong.calibrereader.ui.theme.AppCardShape
+import com.lichong.calibrereader.ui.theme.AppCoverShape
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,8 +100,8 @@ fun LibraryScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.padding(padding).fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(items, key = { it.book.id }) { item ->
                     LibraryCard(
@@ -138,11 +141,13 @@ private fun LibraryCard(
     val book = item.book
     Card(
         onClick = onClick,
+        shape = AppCardShape,
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Row(Modifier.fillMaxWidth().padding(10.dp)) {
+        Row(Modifier.fillMaxWidth().padding(12.dp)) {
             Card(
-                shape = RoundedCornerShape(6.dp),
+                shape = AppCoverShape,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 RemoteCover(
@@ -217,7 +222,12 @@ private fun LibraryCard(
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = { book.progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(3.dp)
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(999.dp))
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(

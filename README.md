@@ -2,7 +2,7 @@
 
 自建 Calibre 服务的 Android 客户端。**calibre-server（官方内容服务器）与 Calibre-Web 双兼容**，全部走 OPDS 1.2 协议，不硬编码任何服务端路由；内置 Readium 阅读器，不再依赖第三方阅读 App。
 
-## 已实现（v0.5.0）
+## 已实现（v0.6.0）
 
 | 模块 | 说明 |
 |---|---|
@@ -18,6 +18,27 @@
 | **内置阅读器** | Readium 3.1.2 渲染 EPUB / KEPUB；左右翻页或滚动模式；目录跳转；字号、行距、衬线/无衬线、白底/护眼/夜间主题实时生效 |
 | **进度同步** | Calibre-Web Kobo 协议双向同步（拉取 + 推送），calibre-server 自动降级为本地保存 |
 | **检查更新** | GitHub Releases 版本检查（启动静默 + 手动）、APK 下载、拉起系统安装器、未知来源授权跳转与返回续装 |
+| **外观** | 墨紫（weknora-mobile）/ 晴蓝（AnyWords）两套配色 × 跟随系统 / 浅色 / 深色，设置页实时切换；统一大圆角、字体排版与卡片层次 |
+
+## v0.6.0：视觉重做，对齐其他软件的设计语言
+
+参考的是用户自己项目里的真实 token，不是凭感觉配色：
+
+| 来源 | 取用的设计 token |
+|---|---|
+| `weknora-mobile/tailwind.config.js` | `brand` 紫色阶（`#6D5CF5` / `#5B5BD6`）、`surface`（`#F6F7F9` / `#F0F1F4`）、`ink`（`#1A1D26` / `#5B5F66`）、`line`、`accent`、18~24px 大圆角、`0 4px 12px rgba(17,17,26,.06)` 轻阴影、Inter / Noto Sans SC |
+| `weknora-mobile/src/index.css` `.dark` | 深色表面 `#121317` / `#1C1E24` / `#26282F`，文字 `#ECEEF3` / `#B4B9C3` |
+| `AnyWords/frontend/src/index.css` | 苹果风 `--accent #0071E3` / `#2997FF`、`--bg #F5F5F7`、`--text #1D1D1F`、`--border #D2D2D7`、克制留白 |
+
+| 改动 | 效果 |
+|---|---|
+| 关掉 `dynamicColor` | 之前 Android 12+ 会按壁纸生成 Material You 配色，把自定义品牌色冲掉，同一台机器观感都不一致 —— 这是「杂」的主因。现在颜色完全由配色方案决定 |
+| 四套 ColorScheme | 墨紫 / 晴蓝 × 浅色 / 深色，`Color.kt` 集中管理 |
+| Design Token | `Type.kt` 收紧字距、调整行高；`Shape.kt` 统一 8~28dp 圆角，全 App 卡片/按钮/弹层一致 |
+| 设置页「外观」卡片 | 两套配色 + 跟随系统 / 浅色 / 深色，`ThemePrefs` 持久化，切换立即生效（MainActivity 与阅读器同步重组） |
+| 书库网格 | 封面 14dp 圆角 + 3dp 阴影、渐变书脊占位（不再是平涂色块）、网格间距与书名/作者排版重排 |
+| 引导页 | 品牌渐变插画替代默认图标、白卡片层次、52dp 主按钮 |
+| 其它 | 底部导航细分隔线 + 纯 surface 底、详情弹层 24dp 顶部圆角、书架进度条圆角、空态图标圆形容器、启动窗口背景与 launcher 底色跟随新配色 |
 
 ## v0.5.0：修掉「升级后还是设置页、按钮全点不了」
 
