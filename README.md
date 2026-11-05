@@ -2,14 +2,15 @@
 
 自建 Calibre 服务的 Android 客户端。**calibre-server（官方内容服务器）与 Calibre-Web 双兼容**，全部走 OPDS 1.2 协议，不硬编码任何服务端路由；内置 Readium 阅读器，不再依赖第三方阅读 App。
 
-## 已实现（v0.3.0）
+## 已实现（v0.4.0）
 
 | 模块 | 说明 |
 |---|---|
 | 服务器管理 | 多服务器保存、地址自动补全、OPDS 路径自动探测（`/opds/`、`/opds`、`/opds/v1.2/catalog`）、服务类型识别 |
 | 认证 | HTTP Basic；密码用 AndroidKeyStore AES-GCM 加密后落盘 |
 | 网络兼容 | 明文 HTTP、自签证书开关、连接超时友好提示 |
-| 书库浏览 | OPDS 目录导航栈、面包屑返回、分页自动加载、搜索（OpenSearch 模板） |
+| 书库浏览 | 打开即见书（自动进入全库目录）、OPDS 导航栈、快捷分类、分页自动加载、全库搜索（OpenSearch 模板沿用根目录） |
+| 一键阅读 | 已下载的书直接打开；未下载自动取 EPUB 下载并拉起内置阅读器 |
 | 封面 | 带认证加载 + 内存 LRU + OkHttp 磁盘缓存，无封面显示书名占位 |
 | 书籍详情 | 元数据（作者/出版社/语言/日期/标签）、简介、多格式列表与文件大小 |
 | 下载 | 64KB 流式下载、`.part` 临时文件、进度回调、完成后入库 |
@@ -18,9 +19,28 @@
 | **进度同步** | Calibre-Web Kobo 协议双向同步（拉取 + 推送），calibre-server 自动降级为本地保存 |
 | **检查更新** | GitHub Releases 版本检查（启动静默 + 手动）、APK 下载、拉起系统安装器、未知来源授权跳转与返回续装 |
 
+## v0.4.0：书库优先
+
+之前只要没配置服务器，底部导航会被强制改成服务器设置页，点「书库」没有反应 —— 等于把「手机方便访问书库」这个主目的挡在门外。这一版把书库做成真正的主界面：
+
+| 改动 | 效果 |
+|---|---|
+| 去掉 tab 强制跳转 | 书库 / 书架 / 设置三个 tab 始终可切换，书库是默认首页 |
+| 首帧就绪判定 | DataStore 首帧空列表不再闪设置页，改为「正在准备书库…」 |
+| 书库内连接引导 | 没连服务器时，书库页直接弹「添加服务器」，不用先跳设置页 |
+| 自动直达书籍列表 | OPDS 根只是分类导航时，自动进入「全部书籍 / By Title / 最新」类入口；返回键可回到分类页 |
+| 快捷入口 | 分类页顶部一排 chip，少点一层目录 |
+| 全局搜索 | 根 feed 的 OpenSearch 模板沿用到子目录，任何位置都能搜全库 |
+| 一键阅读 | 书籍详情主按钮：已下载直接打开，未下载自动下载首选格式并拉起阅读器 |
+| 服务器切换 | 多台服务器时，书库顶栏「切换 ▾」直接换库 |
+| 混合目录 | 目录 + 书籍混合的 feed 分区展示，目录不再被画成书封面 |
+| 错误页兜底 | 连不上时除「重试」外可直接「检查服务器设置」 |
+
+首次使用：打开 App → 书库页「连接 Calibre 服务器」→ 填 `http://<内网IP>:8083`（calibre-server 一般是 8080）→ 保存，自动探测 OPDS 并回到书库 → 点书 → 一键阅读。
+
 ## 应用内更新
 
-版本来源于本仓库的 GitHub Releases。启动时静默检查一次（12 小时节流），服务器页底部「关于」卡片可随时手动检查。
+版本来源于本仓库的 GitHub Releases。启动时静默检查一次（12 小时节流），设置页底部「关于」卡片可随时手动检查。
 
 ```
 GitHub Releases (latest)
@@ -71,7 +91,7 @@ PDF / MOBI / AZW3 / CBZ 仍走系统阅读器（Readium 的 PDF navigator 需要
 ```bash
 # 环境：JDK 17+、Android SDK 35、Gradle 8.14.2
 ./gradlew :app:assembleDebug        # 产物 app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:testDebugUnitTest    # 10 个单元测试：OPDS 解析 + Kobo 同步能力
+./gradlew :app:testDebugUnitTest    # 16 个单元测试：OPDS 解析 + Kobo 同步 + 版本比较
 ```
 
 `local.properties` 需指向本机 SDK：
@@ -111,7 +131,7 @@ app/src/main/java/com/lichong/calibrereader/
 │   ├── reader/                Readium Publication 加载
 │   └── sync/                  Kobo 协议进度同步
 └── ui/
-    ├── AppRoot.kt             底部导航（书库/书架/服务器）
+    ├── AppRoot.kt             底部导航（书库/书架/设置）+ 书库首页连接引导
     ├── browse/                浏览 + 详情 + 下载
     ├── library/               书架
     ├── reader/                内置阅读器（Activity + Compose + Fragment 宿主）
@@ -125,6 +145,7 @@ app/src/main/java/com/lichong/calibrereader/
 - 内置阅读器只覆盖 EPUB/KEPUB；PDF 需另加 `io.legere:pdfiumandroid`
 - 进度同步仅 Calibre-Web（需 Kobo 令牌），不支持官方 calibre-server
 - 阅读偏好为全局共享，不按书单独记忆
-- 未做真机验证（开发环境无连接设备）
+- 未做真机验证（开发环境无连接设备）；`AndroidView` 承载 Readium Fragment、未知来源授权返回续装等仍待实机确认
+- 「自动直达书籍列表」靠 OPDS 根导航条目标题匹配（中英文关键字）；服务端若用了完全不同的命名，会停在分类页，可用快捷入口手动进入
 - 自更新依赖 GitHub 可达；GitHub API 匿名限流 60 次/小时（12h 节流远低于此）
 - Debug 签名，仅自用。若换正式签名，必须先在设备上卸载旧版，否则安装器会拒绝覆盖

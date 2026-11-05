@@ -1,26 +1,50 @@
 package com.lichong.calibrereader.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,26 +57,42 @@ import com.lichong.calibrereader.ui.browse.BrowseScreen
 import com.lichong.calibrereader.ui.browse.BrowseViewModel
 import com.lichong.calibrereader.ui.library.LibraryScreen
 import com.lichong.calibrereader.ui.library.LibraryViewModel
+import com.lichong.calibrereader.ui.server.ServerEditDialog
 import com.lichong.calibrereader.ui.server.ServerListScreen
 import com.lichong.calibrereader.ui.update.UpdatePromptDialog
 import com.lichong.calibrereader.ui.update.UpdateViewModel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 private const val TAB_BROWSE = 0
 private const val TAB_LIBRARY = 1
-private const val TAB_SERVERS = 2
+private const val TAB_SETTINGS = 2
+
+/** DataStore 首帧为空，用 null 区分「还没读到配置」与「确实没有服务器」。 */
+private data class ServerSnapshot(
+    val servers: List<ServerConfig>,
+    val active: ServerConfig?
+)
 
 @Composable
 fun AppRoot(container: AppContainer) {
-    val servers by container.serverStore.servers.collectAsStateWithLifecycle(initialValue = emptyList())
-    val active by container.serverStore.activeServer.collectAsStateWithLifecycle(initialValue = null)
+    // 一次收集两份配置，避免首帧闪过设置页
+    val snapshot by produceState<ServerSnapshot?>(initialValue = null) {
+        combine(
+            container.serverStore.servers,
+            container.serverStore.activeServer
+        ) { list, active -> ServerSnapshot(list, active) }
+            .collect { value = it }
+    }
+    val servers = snapshot?.servers.orEmpty()
+    val active = snapshot?.active
+
+    // 书库永远是首页，且没有任何强制跳转
     var tab by rememberSaveable { mutableStateOf(TAB_BROWSE) }
+    var showAddServer by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // 首帧后把激活配置写进内存快照，供认证拦截器使用
-    LaunchedEffect(servers, active?.id) {
-        container.serverStore.updateCache(active)
-    }
+    LaunchedEffect(active?.id) { container.serverStore.updateCache(active) }
 
     val libraryVm: LibraryViewModel = viewModel(
         factory = viewModelFactory { initializer { LibraryViewModel(container) } }
@@ -78,54 +118,56 @@ fun AppRoot(container: AppContainer) {
         )
     }
 
-    val effectiveTab = if (servers.isEmpty()) TAB_SERVERS else tab
-
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
-                    selected = effectiveTab == TAB_BROWSE,
+                    selected = tab == TAB_BROWSE,
                     onClick = { tab = TAB_BROWSE },
                     icon = { Icon(Icons.Default.List, contentDescription = null) },
                     label = { Text("书库") }
                 )
                 NavigationBarItem(
-                    selected = effectiveTab == TAB_LIBRARY,
+                    selected = tab == TAB_LIBRARY,
                     onClick = { tab = TAB_LIBRARY },
                     icon = { Icon(Icons.Default.Star, contentDescription = null) },
                     label = { Text("书架") }
                 )
                 NavigationBarItem(
-                    selected = effectiveTab == TAB_SERVERS,
-                    onClick = { tab = TAB_SERVERS },
+                    selected = tab == TAB_SETTINGS,
+                    onClick = { tab = TAB_SETTINGS },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                    label = { Text("服务器") }
+                    label = { Text("设置") }
                 )
             }
         }
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            when (effectiveTab) {
-                TAB_BROWSE -> {
-                    val server = active
-                    if (server != null) {
+            when {
+                snapshot == null -> LoadingBox("正在准备书库…")
+
+                tab == TAB_BROWSE -> {
+                    if (active != null) {
                         BrowseRoute(
                             container = container,
-                            server = server,
-                            onOpenServers = { tab = TAB_SERVERS }
+                            server = active,
+                            servers = servers,
+                            onSwitchServer = { cfg ->
+                                scope.launch { container.serverStore.setActive(cfg.id) }
+                            },
+                            onOpenServers = { tab = TAB_SETTINGS }
                         )
                     } else {
-                        MessageState(
-                            title = "还没有连接服务器",
-                            detail = "先在「服务器」里添加你的 Calibre 地址",
-                            actionText = "去设置",
-                            onAction = { tab = TAB_SERVERS }
+                        ConnectLibraryScreen(
+                            hasSavedServers = servers.isNotEmpty(),
+                            onAdd = { showAddServer = true },
+                            onOpenSettings = { tab = TAB_SETTINGS }
                         )
                     }
                 }
 
-                TAB_LIBRARY -> LibraryScreen(
+                tab == TAB_LIBRARY -> LibraryScreen(
                     items = libraryItems,
                     message = libraryMessage,
                     onOpen = libraryVm::open,
@@ -152,12 +194,119 @@ fun AppRoot(container: AppContainer) {
             }
         }
     }
+
+    // 在书库页里直接弹添加对话框，不用先跳去设置页
+    if (showAddServer) {
+        ServerEditDialog(
+            container = container,
+            initial = null,
+            onDismiss = { showAddServer = false },
+            onSaved = { cfg ->
+                showAddServer = false
+                scope.launch { container.serverStore.setActive(cfg.id) }
+                tab = TAB_BROWSE
+            }
+        )
+    }
+}
+
+/** 还没连服务器时的书库首页：说明用途 + 一步连接，而不是整屏设置。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConnectLibraryScreen(
+    hasSavedServers: Boolean,
+    onAdd: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("书库") }) }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(76.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.List,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(38.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(22.dp))
+            Text(
+                "把书库装进口袋",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "连上自建 Calibre 后，打开就是书库：翻目录、搜书、看封面、下载即读，\n不用再在手机浏览器里缩放网页。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(24.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("只需填一次地址", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "例如 http://192.168.1.10:8083\nOPDS 路径自动探测，用户名密码可选。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AssistChip(onClick = onAdd, label = { Text("calibre-server") })
+                        AssistChip(onClick = onAdd, label = { Text("Calibre-Web") })
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = onAdd,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("连接 Calibre 服务器")
+            }
+            if (hasSavedServers) {
+                TextButton(onClick = onOpenSettings) { Text("管理已保存的服务器") }
+            } else {
+                TextButton(onClick = onOpenSettings) { Text("服务器与更新设置") }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
 }
 
 @Composable
 private fun BrowseRoute(
     container: AppContainer,
     server: ServerConfig,
+    servers: List<ServerConfig>,
+    onSwitchServer: (ServerConfig) -> Unit,
     onOpenServers: () -> Unit
 ) {
     val vm: BrowseViewModel = viewModel(
@@ -171,6 +320,8 @@ private fun BrowseRoute(
     BrowseScreen(
         state = state,
         server = server,
+        servers = servers,
+        onSwitchServer = onSwitchServer,
         onBack = { vm.back() },
         onOpen = vm::openEntry,
         onRefresh = vm::refresh,
@@ -180,6 +331,7 @@ private fun BrowseRoute(
         onQueryChange = vm::setQuery,
         onSelect = vm::select,
         onDownload = vm::download,
+        onQuickRead = vm::quickRead,
         onOpenFile = vm::openLocalFile,
         onClearDownload = vm::clearDownload,
         onClearMessage = vm::clearMessage,

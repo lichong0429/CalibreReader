@@ -1,8 +1,6 @@
 package com.lichong.calibrereader.ui.browse
 
-import android.content.ActivityNotFoundException
 import android.content.Intent
-import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lichong.calibrereader.AppContainer
@@ -10,9 +8,11 @@ import com.lichong.calibrereader.data.db.BookEntity
 import com.lichong.calibrereader.data.download.BookOpener
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.net.OpdsHttpException
+import com.lichong.calibrereader.data.opds.FeedKind
 import com.lichong.calibrereader.data.opds.OpdsEntry
 import com.lichong.calibrereader.data.opds.OpdsFeed
 import com.lichong.calibrereader.data.opds.OpdsLink
+import com.lichong.calibrereader.data.opds.pickAllBooksShortcut
 import com.lichong.calibrereader.ui.reader.ReaderActivity
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,6 +54,8 @@ data class BrowseUiState(
 ) {
     val canGoBack: Boolean get() = crumbs.size > 1
     val title: String get() = feed?.title?.takeIf { it.isNotBlank() } ?: crumbs.lastOrNull()?.title.orEmpty()
+    /** 根分类页可作为「快捷分类」展示 */
+    val isRootCatalog: Boolean get() = crumbs.size == 1 && feed?.kind == FeedKind.NAVIGATION
 }
 
 class BrowseViewModel(
@@ -66,11 +68,14 @@ class BrowseViewModel(
 
     private val stack = mutableListOf<Crumb>()
     private var loadJob: Job? = null
+    private var rootUrl = ""
+    /** 根 feed 的 OpenSearch 模板，进入子目录后仍可搜索全库 */
+    private var rootSearchTemplate: String? = null
 
     init {
-        val root = server.opdsRootUrl.ifBlank { server.baseUrl.trimEnd('/') + "/opds/" }
-        stack.add(Crumb(root, ""))
-        load(root)
+        rootUrl = server.opdsRootUrl.ifBlank { server.baseUrl.trimEnd('/') + "/opds/" }
+        stack.add(Crumb(rootUrl, ""))
+        load(rootUrl)
     }
 
     private fun load(url: String) {
@@ -80,6 +85,9 @@ class BrowseViewModel(
             try {
                 val resp = container.opdsClient.fetch(server, url)
                 val feedTitle = resp.feed.title.orEmpty()
+                val isRoot = url == rootUrl
+                if (isRoot) rootSearchTemplate = resp.feed.searchTemplate
+
                 val idx = stack.indexOfLast { it.url == url }
                 if (idx >= 0 && stack[idx].title.isBlank()) {
                     stack[idx] = stack[idx].copy(title = feedTitle)
@@ -90,10 +98,19 @@ class BrowseViewModel(
                         feed = resp.feed,
                         entries = resp.feed.entries,
                         nextUrl = resp.feed.nextUrl,
-                        searchTemplate = resp.feed.searchTemplate,
+                        // 子目录没有搜索模板时沿用根目录的，保证任何位置都能搜全库
+                        searchTemplate = resp.feed.searchTemplate ?: rootSearchTemplate,
                         crumbs = stack.toList(),
                         error = null
                     )
+                }
+
+                // 首页若只是分类导航，自动进到「全部书籍」类目录；返回键可回到分类页
+                if (isRoot && stack.size == 1) {
+                    pickAllBooksShortcut(resp.feed)?.let { shortcut ->
+                        stack.add(Crumb(shortcut.href, shortcut.title))
+                        viewModelScope.launch { load(shortcut.href) }
+                    }
                 }
             } catch (e: Exception) {
                 val msg = when (e) {
@@ -192,35 +209,64 @@ class BrowseViewModel(
 
     fun download(entry: OpdsEntry, link: OpdsLink) {
         if (_state.value.download is DownloadState.Running) return
+        viewModelScope.launch { performDownload(entry, link, autoOpen = false) }
+    }
+
+    /** 一键阅读：已下载就直接打开，否则自动下载首选格式并拉起阅读器。 */
+    fun quickRead(entry: OpdsEntry) {
+        if (_state.value.download is DownloadState.Running) return
         viewModelScope.launch {
-            _state.update { it.copy(download = DownloadState.Running(link.format.label, 0, -1)) }
-            try {
-                val file = container.downloader.download(server, link, entry.title) { done, total ->
-                    _state.update { s ->
-                        val running = s.download as? DownloadState.Running ?: return@update s
-                        s.copy(download = running.copy(downloaded = done, total = total))
-                    }
-                }
-                container.bookRepo.save(
-                    BookEntity(
-                        id = "${server.id}:${entry.id}",
-                        serverId = server.id,
-                        serverName = server.displayName,
-                        title = entry.title,
-                        authors = entry.authorLine,
-                        format = link.format.name,
-                        filePath = file.absolutePath,
-                        coverUrl = entry.coverUrl,
-                        calibreId = entry.calibreId,
-                        koboUuid = entry.koboUuid,
-                        sizeBytes = file.length(),
-                        downloadedAt = System.currentTimeMillis()
-                    )
-                )
-                _state.update { it.copy(download = DownloadState.Done(file.absolutePath, file.name)) }
-            } catch (e: Exception) {
-                _state.update { it.copy(download = DownloadState.Failed(e.message ?: "下载失败")) }
+            val existing = runCatching {
+                container.bookRepo.find("${server.id}:${entry.id}")
+            }.getOrNull()
+            if (existing != null && File(existing.filePath).length() > 0) {
+                _state.update { it.copy(selected = null, download = DownloadState.Idle) }
+                openLocalFile(existing.filePath)
+                return@launch
             }
+            val link = entry.acquisitionLinks.firstOrNull { it.format.isReadableInApp }
+                ?: entry.acquisitionLinks.firstOrNull()
+            if (link == null) {
+                _state.update { it.copy(message = "该书没有可下载的格式") }
+                return@launch
+            }
+            performDownload(entry, link, autoOpen = true)
+        }
+    }
+
+    private suspend fun performDownload(entry: OpdsEntry, link: OpdsLink, autoOpen: Boolean) {
+        _state.update { it.copy(download = DownloadState.Running(link.format.label, 0, -1)) }
+        try {
+            val file = container.downloader.download(server, link, entry.title) { done, total ->
+                _state.update { s ->
+                    val running = s.download as? DownloadState.Running ?: return@update s
+                    s.copy(download = running.copy(downloaded = done, total = total))
+                }
+            }
+            container.bookRepo.save(
+                BookEntity(
+                    id = "${server.id}:${entry.id}",
+                    serverId = server.id,
+                    serverName = server.displayName,
+                    title = entry.title,
+                    authors = entry.authorLine,
+                    format = link.format.name,
+                    filePath = file.absolutePath,
+                    coverUrl = entry.coverUrl,
+                    calibreId = entry.calibreId,
+                    koboUuid = entry.koboUuid,
+                    sizeBytes = file.length(),
+                    downloadedAt = System.currentTimeMillis()
+                )
+            )
+            if (autoOpen) {
+                _state.update { it.copy(download = DownloadState.Idle, selected = null) }
+                openLocalFile(file.absolutePath)
+            } else {
+                _state.update { it.copy(download = DownloadState.Done(file.absolutePath, file.name)) }
+            }
+        } catch (e: Exception) {
+            _state.update { it.copy(download = DownloadState.Failed(e.message ?: "下载失败")) }
         }
     }
 

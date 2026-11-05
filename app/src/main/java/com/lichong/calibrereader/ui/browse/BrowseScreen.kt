@@ -3,6 +3,7 @@ package com.lichong.calibrereader.ui.browse
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,15 +30,19 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,7 +63,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -82,6 +89,8 @@ import com.lichong.calibrereader.ui.formatSize
 fun BrowseScreen(
     state: BrowseUiState,
     server: ServerConfig,
+    servers: List<ServerConfig>,
+    onSwitchServer: (ServerConfig) -> Unit,
     onBack: () -> Unit,
     onOpen: (OpdsEntry) -> Unit,
     onRefresh: () -> Unit,
@@ -91,6 +100,7 @@ fun BrowseScreen(
     onQueryChange: (String) -> Unit,
     onSelect: (OpdsEntry?) -> Unit,
     onDownload: (OpdsEntry, OpdsLink) -> Unit,
+    onQuickRead: (OpdsEntry) -> Unit,
     onOpenFile: (String) -> Unit,
     onClearDownload: () -> Unit,
     onClearMessage: () -> Unit,
@@ -113,6 +123,8 @@ fun BrowseScreen(
             BrowseTopBar(
                 state = state,
                 server = server,
+                servers = servers,
+                onSwitchServer = onSwitchServer,
                 onBack = onBack,
                 onRefresh = onRefresh,
                 onOpenServers = onOpenServers,
@@ -128,10 +140,12 @@ fun BrowseScreen(
                 state.loading && state.entries.isEmpty() -> LoadingBox()
 
                 state.error != null && state.entries.isEmpty() -> MessageState(
-                    title = "加载失败",
+                    title = "连不上书库",
                     detail = state.error,
                     actionText = "重试",
                     onAction = onRefresh,
+                    secondActionText = "检查服务器设置",
+                    onSecondAction = onOpenServers,
                     showIcon = true
                 )
 
@@ -159,6 +173,7 @@ fun BrowseScreen(
             download = state.download,
             onDismiss = { onSelect(null) },
             onDownload = { link -> onDownload(entry, link) },
+            onQuickRead = { onQuickRead(entry) },
             onOpenFile = onOpenFile,
             onResetDownload = onClearDownload
         )
@@ -170,6 +185,8 @@ fun BrowseScreen(
 private fun BrowseTopBar(
     state: BrowseUiState,
     server: ServerConfig,
+    servers: List<ServerConfig>,
+    onSwitchServer: (ServerConfig) -> Unit,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onOpenServers: () -> Unit,
@@ -177,6 +194,8 @@ private fun BrowseTopBar(
     onQueryChange: (String) -> Unit,
     onSearch: (String) -> Unit
 ) {
+    var serverMenu by remember { mutableStateOf(false) }
+
     if (state.searchActive) {
         TopAppBar(
             navigationIcon = {
@@ -212,7 +231,7 @@ private fun BrowseTopBar(
             navigationIcon = {
                 if (state.canGoBack) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回分类目录")
                     }
                 } else {
                     IconButton(onClick = onOpenServers) {
@@ -229,7 +248,12 @@ private fun BrowseTopBar(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        server.displayName,
+                        buildString {
+                            append(server.displayName)
+                            if (!state.loading && state.entries.isNotEmpty()) {
+                                append(" · ").append(state.entries.size).append(" 项")
+                            }
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -238,6 +262,45 @@ private fun BrowseTopBar(
                 }
             },
             actions = {
+                // 多台服务器时，书库顶栏直接切换，不用绕去设置页
+                if (servers.size > 1) {
+                    Box {
+                        TextButton(onClick = { serverMenu = true }) {
+                            Text("切换 ▾", style = MaterialTheme.typography.labelMedium)
+                        }
+                        DropdownMenu(
+                            expanded = serverMenu,
+                            onDismissRequest = { serverMenu = false }
+                        ) {
+                            servers.forEach { cfg ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            cfg.displayName,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (cfg.id == server.id) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = "当前使用",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        } else {
+                                            Spacer(Modifier.size(24.dp))
+                                        }
+                                    },
+                                    onClick = {
+                                        serverMenu = false
+                                        if (cfg.id != server.id) onSwitchServer(cfg)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
                 if (!state.searchTemplate.isNullOrBlank()) {
                     IconButton(onClick = { onSearchActiveChange(true) }) {
                         Icon(Icons.Default.Search, contentDescription = "搜索")
@@ -261,6 +324,10 @@ private fun NavList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
+        if (state.isRootCatalog && state.entries.size > 1) {
+            item { QuickLinksRow(state.entries, onOpen) }
+            item { HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) }
+        }
         listItems(state.entries, key = { it.id }) { entry ->
             ListItem(
                 headlineContent = {
@@ -296,12 +363,48 @@ private fun NavList(
     }
 }
 
+/** 根分类页顶部的一排快捷入口，少点一层目录 */
+@Composable
+private fun QuickLinksRow(
+    entries: List<OpdsEntry>,
+    onOpen: (OpdsEntry) -> Unit
+) {
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
+        Text(
+            "快捷入口",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            entries.take(8).forEach { entry ->
+                AssistChip(
+                    onClick = { onOpen(entry) },
+                    label = {
+                        Text(
+                            entry.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun BookGrid(
     state: BrowseUiState,
     onOpen: (OpdsEntry) -> Unit,
     onLoadMore: () -> Unit
 ) {
+    // 混合 feed 里既有子目录又有书，目录单独成行，别把目录画成书封面
+    val navEntries = state.entries.filter { it.isNavigation }
+    val bookEntries = state.entries.filterNot { it.isNavigation }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 108.dp),
         modifier = Modifier.fillMaxSize(),
@@ -309,7 +412,25 @@ private fun BookGrid(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        gridItems(state.entries, key = { it.id }) { entry ->
+        if (navEntries.isNotEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    navEntries.forEach { entry ->
+                        ListItem(
+                            headlineContent = {
+                                Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
+                            trailingContent = {
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
+                            },
+                            modifier = Modifier.clickable { onOpen(entry) }
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                    }
+                }
+            }
+        }
+        gridItems(bookEntries, key = { it.id }) { entry ->
             BookCard(entry) { onOpen(entry) }
         }
         if (state.nextUrl != null) {
@@ -379,6 +500,7 @@ private fun BookDetailSheet(
     download: DownloadState,
     onDismiss: () -> Unit,
     onDownload: (OpdsLink) -> Unit,
+    onQuickRead: () -> Unit,
     onOpenFile: (String) -> Unit,
     onResetDownload: () -> Unit
 ) {
@@ -450,8 +572,24 @@ private fun BookDetailSheet(
                 Text(summary, style = MaterialTheme.typography.bodyMedium)
             }
 
+            if (entry.acquisitionLinks.isNotEmpty()) {
+                Spacer(Modifier.height(18.dp))
+                SectionTitle("阅读")
+                Button(
+                    onClick = onQuickRead,
+                    enabled = download !is DownloadState.Running,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("一键阅读") }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "已下载的书直接打开；没下载的会自动取 EPUB 并拉起内置阅读器。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             Spacer(Modifier.height(18.dp))
-            SectionTitle("下载")
+            SectionTitle("下载其它格式")
 
             if (entry.acquisitionLinks.isEmpty()) {
                 Text("该书目没有可下载的格式", style = MaterialTheme.typography.bodySmall)

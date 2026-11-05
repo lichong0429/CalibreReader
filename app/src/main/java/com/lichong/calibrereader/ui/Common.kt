@@ -3,6 +3,7 @@ package com.lichong.calibrereader.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +42,9 @@ fun MessageState(
     detail: String? = null,
     actionText: String? = null,
     onAction: (() -> Unit)? = null,
-    showIcon: Boolean = false
+    showIcon: Boolean = false,
+    secondActionText: String? = null,
+    onSecondAction: (() -> Unit)? = null
 ) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -70,7 +74,15 @@ fun MessageState(
             }
             if (actionText != null && onAction != null) {
                 Spacer(Modifier.height(20.dp))
-                Button(onClick = onAction) { Text(actionText) }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (secondActionText != null && onSecondAction != null) {
+                        TextButton(onClick = onSecondAction) { Text(secondActionText) }
+                    }
+                    Button(onClick = onAction) { Text(actionText) }
+                }
             }
         }
     }
