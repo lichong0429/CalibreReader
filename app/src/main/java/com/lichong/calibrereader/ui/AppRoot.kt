@@ -37,8 +37,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +52,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.lichong.calibrereader.AppContainer
+import com.lichong.calibrereader.BuildConfig
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.ui.browse.BrowseScreen
 import com.lichong.calibrereader.ui.browse.BrowseViewModel
@@ -62,7 +63,9 @@ import com.lichong.calibrereader.ui.server.ServerListScreen
 import com.lichong.calibrereader.ui.update.UpdatePromptDialog
 import com.lichong.calibrereader.ui.update.UpdateViewModel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAB_BROWSE = 0
 private const val TAB_LIBRARY = 1
@@ -76,20 +79,29 @@ private data class ServerSnapshot(
 
 @Composable
 fun AppRoot(container: AppContainer) {
-    // 一次收集两份配置，避免首帧闪过设置页
+    // 一次收集两份配置，避免首帧闪过设置页。
+    // 超时/异常都回退成「无服务器」，绝不让界面卡在无限加载圈里。
     val snapshot by produceState<ServerSnapshot?>(initialValue = null) {
-        combine(
+        val flow = combine(
             container.serverStore.servers,
             container.serverStore.activeServer
         ) { list, active -> ServerSnapshot(list, active) }
-            .collect { value = it }
+
+        val first = runCatching {
+            withTimeoutOrNull(3_000L) { flow.first() }
+        }.getOrNull() ?: ServerSnapshot(emptyList(), null)
+        value = first
+
+        runCatching { flow.collect { value = it } }
     }
     val servers = snapshot?.servers.orEmpty()
     val active = snapshot?.active
 
-    // 书库永远是首页，且没有任何强制跳转
-    var tab by rememberSaveable { mutableStateOf(TAB_BROWSE) }
-    var showAddServer by rememberSaveable { mutableStateOf(false) }
+    // 冷启动永远是书库。这里刻意不用 rememberSaveable：
+    // 旧版本会把「停留在设置页」的 tab 存进 savedInstanceState，升级后被恢复回来，
+    // 表现就是「打开 App 还是设置页、怎么点都回不去」。
+    var tab by remember { mutableStateOf(TAB_BROWSE) }
+    var showAddServer by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(active?.id) { container.serverStore.updateCache(active) }
@@ -110,7 +122,7 @@ fun AppRoot(container: AppContainer) {
     // 从「安装未知应用」授权页返回后继续安装
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { updateVm.retryInstall() }
 
-    if (updateState.promptVisible) {
+    if (updateState.promptVisible && updateState.info != null) {
         UpdatePromptDialog(
             state = updateState,
             onDismiss = updateVm::dismissPrompt,
@@ -186,6 +198,7 @@ fun AppRoot(container: AppContainer) {
                     onDownloadUpdate = updateVm::download,
                     onRetryInstall = updateVm::retryInstall,
                     onBack = {},
+                    onOpenLibrary = { tab = TAB_BROWSE },
                     onUse = { cfg: ServerConfig ->
                         scope.launch { container.serverStore.setActive(cfg.id) }
                         tab = TAB_BROWSE
@@ -219,7 +232,19 @@ private fun ConnectLibraryScreen(
     onOpenSettings: () -> Unit
 ) {
     Scaffold(
-        topBar = { TopAppBar(title = { Text("书库") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text("书库") },
+                actions = {
+                    Text(
+                        "v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
+                }
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -296,6 +321,13 @@ private fun ConnectLibraryScreen(
             } else {
                 TextButton(onClick = onOpenSettings) { Text("服务器与更新设置") }
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "右上角是当前版本号。若不是 v${BuildConfig.VERSION_NAME}，说明新安装包还没有装成功。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
             Spacer(Modifier.height(16.dp))
         }
     }

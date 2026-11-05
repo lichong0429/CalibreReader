@@ -60,13 +60,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.lichong.calibrereader.AppContainer
+import com.lichong.calibrereader.BuildConfig
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.net.ProbeResult
 import com.lichong.calibrereader.data.net.ServerProbe
 import com.lichong.calibrereader.ui.MessageState
 import com.lichong.calibrereader.ui.update.AboutCard
 import com.lichong.calibrereader.ui.update.UpdateUiState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,6 +84,7 @@ fun ServerListScreen(
     onDownloadUpdate: () -> Unit,
     onRetryInstall: () -> Unit,
     onBack: () -> Unit,
+    onOpenLibrary: () -> Unit,
     onUse: (ServerConfig) -> Unit
 ) {
     var creating by remember { mutableStateOf(false) }
@@ -97,6 +102,14 @@ fun ServerListScreen(
                             Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                         }
                     }
+                },
+                actions = {
+                    Text(
+                        "v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = onOpenLibrary) { Text("回书库") }
                 }
             )
         },
@@ -304,6 +317,7 @@ fun ServerEditDialog(
     var busy by remember { mutableStateOf(false) }
     var okMessage by remember { mutableStateOf<String?>(null) }
     var errMessage by remember { mutableStateOf<String?>(null) }
+    var probeJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
 
     fun buildDraft(): ServerConfig = (initial ?: ServerProbe.newDraft()).copy(
@@ -315,38 +329,59 @@ fun ServerEditDialog(
         koboToken = koboToken.trim()
     )
 
+    /** 无论探测进行到哪一步，都要能把对话框关掉，绝不把用户锁死。 */
+    fun close() {
+        probeJob?.cancel()
+        probeJob = null
+        busy = false
+        onDismiss()
+    }
+
     fun runProbe(saveAfter: Boolean) {
+        if (busy) return
         if (baseUrl.isBlank()) {
             errMessage = "请填写服务器地址，例如 http://192.168.1.10:8083"
             return
         }
         val draft = buildDraft()
-        scope.launch {
+        probeJob = scope.launch {
             busy = true
             okMessage = null
             errMessage = null
-            when (val result = container.serverProbe.probe(draft)) {
-                is ProbeResult.Success -> {
-                    okMessage = buildString {
-                        append("连接成功 · ").append(result.config.kind.label)
-                        append(" · ").append(result.feed.entries.size).append(" 个入口")
-                        result.notes.forEach { append("\n· ").append(it) }
-                    }
-                    if (saveAfter) {
-                        container.serverStore.upsert(result.config)
-                        onSaved(result.config)
-                    }
+            try {
+                // 25 秒总超时 + 全异常捕获：任何意外都必须让 busy 复位，
+                // 否则三个按钮会一直 disabled、连返回键都关不掉。
+                val outcome = runCatching {
+                    withTimeoutOrNull(25_000L) { container.serverProbe.probe(draft) }
                 }
+                val failure = outcome.exceptionOrNull()
+                val result = outcome.getOrNull()
+                when {
+                    failure is CancellationException -> Unit // 用户主动取消
+                    failure != null -> errMessage = failure.message ?: "连接失败"
+                    result == null -> errMessage = "连接超时（25 秒），请检查地址与网络"
+                    result is ProbeResult.Success -> {
+                        okMessage = buildString {
+                            append("连接成功 · ").append(result.config.kind.label)
+                            append(" · ").append(result.feed.entries.size).append(" 个入口")
+                            result.notes.forEach { append("\n· ").append(it) }
+                        }
+                        if (saveAfter) {
+                            container.serverStore.upsert(result.config)
+                            onSaved(result.config)
+                        }
+                    }
 
-                is ProbeResult.Failure -> {
-                    errMessage = result.summary
+                    result is ProbeResult.Failure -> errMessage = result.summary
                 }
+            } finally {
+                busy = false
+                probeJob = null
             }
-            busy = false
         }
     }
 
-    Dialog(onDismissRequest = { if (!busy) onDismiss() }) {
+    Dialog(onDismissRequest = { close() }) {
         Surface(
             shape = MaterialTheme.shapes.extraLarge,
             color = MaterialTheme.colorScheme.surface
@@ -454,7 +489,9 @@ fun ServerEditDialog(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") }
+                    TextButton(onClick = { close() }) {
+                        Text(if (busy) "取消连接" else "取消")
+                    }
                     Spacer(Modifier.width(4.dp))
                     TextButton(onClick = { runProbe(false) }, enabled = !busy) { Text("测试连接") }
                     Spacer(Modifier.width(4.dp))

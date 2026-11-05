@@ -74,6 +74,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.lichong.calibrereader.BuildConfig
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.opds.FeedKind
 import com.lichong.calibrereader.data.opds.OpdsEntry
@@ -253,6 +254,7 @@ private fun BrowseTopBar(
                             if (!state.loading && state.entries.isNotEmpty()) {
                                 append(" · ").append(state.entries.size).append(" 项")
                             }
+                            append(" · v").append(BuildConfig.VERSION_NAME)
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
