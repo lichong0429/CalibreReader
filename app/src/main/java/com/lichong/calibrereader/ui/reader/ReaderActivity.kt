@@ -138,6 +138,12 @@ class ReaderActivity : AppCompatActivity() {
             ui = ui.copy(loading = false, error = "书架里没有这本书，请重新下载")
             return
         }
+        // PDF 走独立的系统 PdfRenderer 阅读器，Readium 只负责 EPUB/KEPUB
+        if (entity.isPdf) {
+            startActivity(PdfReaderActivity.newIntent(this, entity.id))
+            finish()
+            return
+        }
         book = entity
         val servers = container.serverStore.servers.first()
         server = servers.firstOrNull { it.id == entity.serverId } ?: servers.firstOrNull()

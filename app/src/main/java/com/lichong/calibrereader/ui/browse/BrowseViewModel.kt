@@ -8,8 +8,11 @@ import com.lichong.calibrereader.data.db.BookEntity
 import com.lichong.calibrereader.data.download.BookOpener
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.net.OpdsHttpException
+import com.lichong.calibrereader.data.opds.BookGroups
+import com.lichong.calibrereader.data.opds.BookSection
 import com.lichong.calibrereader.data.opds.CatalogShortcut
 import com.lichong.calibrereader.data.opds.FeedKind
+import com.lichong.calibrereader.data.opds.GroupDimension
 import com.lichong.calibrereader.data.opds.OpdsEntry
 import com.lichong.calibrereader.data.opds.OpdsFeed
 import com.lichong.calibrereader.data.opds.OpdsLink
@@ -51,12 +54,24 @@ data class BrowseUiState(
     val searchQuery: String = "",
     val selected: OpdsEntry? = null,
     val download: DownloadState = DownloadState.Idle,
-    val message: String? = null
+    val message: String? = null,
+    val groupBy: GroupDimension = GroupDimension.NONE,
+    val selectedGroup: String? = null,
+    val rootCatalogAvailable: Boolean = false
 ) {
     val canGoBack: Boolean get() = crumbs.size > 1
     val title: String get() = feed?.title?.takeIf { it.isNotBlank() } ?: crumbs.lastOrNull()?.title.orEmpty()
     /** 根分类页可作为「快捷分类」展示 */
     val isRootCatalog: Boolean get() = crumbs.size == 1 && feed?.kind == FeedKind.NAVIGATION
+
+    val bookEntries: List<OpdsEntry> get() = entries.filter { it.isBook }
+    val navEntries: List<OpdsEntry> get() = entries.filter { it.isNavigation }
+    val groupDimensions: List<GroupDimension> get() = BookGroups.available(bookEntries)
+    val allGroupSections: List<BookSection> get() = BookGroups.sections(bookEntries, groupBy)
+    val groupSections: List<BookSection>
+        get() = allGroupSections.let { all ->
+            selectedGroup?.let { picked -> all.filter { it.name == picked } } ?: all
+        }
 }
 
 class BrowseViewModel(
@@ -72,6 +87,12 @@ class BrowseViewModel(
     private var rootUrl = ""
     /** 根 feed 的 OpenSearch 模板，进入子目录后仍可搜索全库 */
     private var rootSearchTemplate: String? = null
+    private var chosenDimension = GroupDimension.NONE
+    private var groupByInitialized = false
+    private var rootCatalogAvailable = false
+
+    private fun effectiveDimension(books: List<OpdsEntry>): GroupDimension =
+        if (chosenDimension in BookGroups.available(books)) chosenDimension else GroupDimension.NONE
 
     init {
         rootUrl = server.opdsRootUrl.ifBlank { server.baseUrl.trimEnd('/') + "/opds/" }
@@ -93,6 +114,15 @@ class BrowseViewModel(
                 val feedTitle = resp.feed.title.orEmpty()
                 val isRoot = url == rootUrl
                 if (isRoot) rootSearchTemplate = resp.feed.searchTemplate
+                if (isRoot && resp.feed.kind == FeedKind.NAVIGATION) {
+                    rootCatalogAvailable = true
+                }
+                val books = resp.feed.entries.filter { it.isBook }
+                if (books.isNotEmpty() && !groupByInitialized) {
+                    // 默认按标签分组（最接近「文件夹」）；换页/换目录后仍保留用户的选择
+                    chosenDimension = BookGroups.defaultDimension(books)
+                    groupByInitialized = true
+                }
 
                 val idx = stack.indexOfLast { it.url == url }
                 if (idx >= 0 && stack[idx].title.isBlank()) {
@@ -107,7 +137,10 @@ class BrowseViewModel(
                         // 子目录没有搜索模板时沿用根目录的，保证任何位置都能搜全库
                         searchTemplate = resp.feed.searchTemplate ?: rootSearchTemplate,
                         crumbs = stack.toList(),
-                        error = null
+                        error = null,
+                        groupBy = effectiveDimension(books),
+                        selectedGroup = null,
+                        rootCatalogAvailable = rootCatalogAvailable
                     )
                 }
 
@@ -166,6 +199,29 @@ class BrowseViewModel(
 
     fun refresh() {
         stack.lastOrNull()?.let { load(it.url) }
+    }
+
+    fun setGroupBy(dimension: GroupDimension) {
+        chosenDimension = dimension
+        _state.update {
+            it.copy(groupBy = effectiveDimension(it.bookEntries), selectedGroup = null)
+        }
+    }
+
+    fun selectGroup(name: String?) = _state.update {
+        it.copy(selectedGroup = if (it.selectedGroup == name) null else name)
+    }
+
+    /** 一键回到服务端自己的分类树（书架 / 作者 / 系列 / 类别），跳过自动直达 */
+    fun openRootCatalog() {
+        if (!rootCatalogAvailable) return
+        if (stack.size == 1 && stack[0].url == rootUrl) {
+            refresh()
+            return
+        }
+        stack.clear()
+        stack.add(Crumb(rootUrl, ""))
+        load(rootUrl)
     }
 
     fun loadMore() {
@@ -240,7 +296,9 @@ class BrowseViewModel(
                 openLocalFile(existing.filePath)
                 return@launch
             }
-            val link = entry.acquisitionLinks.firstOrNull { it.format.isReadableInApp }
+            // 优先可重排的 EPUB/KEPUB，其次 PDF，最后才退回其它格式（外部应用打开）
+            val link = entry.acquisitionLinks.filter { it.format.isReadableInApp }
+                .minByOrNull { it.format.readPriority }
                 ?: entry.acquisitionLinks.firstOrNull()
             if (link == null) {
                 _state.update { it.copy(message = "该书没有可下载的格式") }

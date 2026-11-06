@@ -37,6 +37,13 @@
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.CalibreReader.Reader" />
 
+        <activity
+            android:name=".ui.reader.PdfReaderActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|fontScale|smallestScreenSize|density"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.CalibreReader.Reader" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

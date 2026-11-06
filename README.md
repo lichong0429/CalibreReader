@@ -1,8 +1,8 @@
 # Calibre 阅读（CalibreReader）
 
-自建 Calibre 服务的 Android 客户端。**calibre-server（官方内容服务器）与 Calibre-Web 双兼容**，全部走 OPDS 1.2 协议，不硬编码任何服务端路由；内置 Readium 阅读器，不再依赖第三方阅读 App。
+自建 Calibre 服务的 Android 客户端。**calibre-server（官方内容服务器）与 Calibre-Web 双兼容**，全部走 OPDS 1.2 协议，不硬编码任何服务端路由；内置 EPUB/KEPUB/PDF 阅读器，不再依赖第三方阅读 App。
 
-## 已实现（v0.9.0）
+## 已实现（v0.10.0）
 
 | 模块 | 说明 |
 |---|---|
@@ -10,16 +10,45 @@
 | 认证 | HTTP Basic；密码用 AndroidKeyStore AES-GCM 加密后落盘 |
 | 网络兼容 | 明文 HTTP、自签证书开关、连接超时友好提示 |
 | 书库浏览 | **兼容 Calibre-Web 无 `rel` 的导航链接**、打开即见书（自动下钻至书籍 feed，最多两层）、OPDS 导航栈、快捷分类、分页自动加载、全库搜索（OpenSearch 模板优先取含 `{searchTerms}` 的链接） |
-| 一键阅读 | 已下载的书直接打开；未下载自动取 EPUB 下载并拉起内置阅读器 |
+| 一键阅读 | 已下载的书直接打开；未下载自动优先取 EPUB/KEPUB，其次 PDF，**全部在 App 内打开** |
+| **书库分组** | 按标签 / 作者 / 系列 / 出版社 / 语言分组显示，可切维度、点分组筛选；「全部分类」一键回到服务端自己的分类树（书架 / 作者 / 系列 / 类别） |
 | 封面 | 带认证加载 + 内存 LRU + OkHttp 磁盘缓存，无封面显示书名占位 |
 | 书籍详情 | 元数据（作者/出版社/语言/日期/标签）、简介、多格式列表与文件大小 |
 | 下载 | 64KB 流式下载、`.part` 临时文件、进度回调、完成后入库 |
 | 书架 | Room 持久化、进度条、文件丢失检测、删除确认 |
-| **内置阅读器** | Readium 3.1.2 渲染 EPUB / KEPUB；左右翻页或滚动模式；目录跳转；字号、行距、衬线/无衬线、白底/护眼/夜间主题实时生效 |
+| **内置阅读器** | Readium 3.1.2 渲染 EPUB / KEPUB；系统 `PdfRenderer` 渲染 PDF（翻页、缩放、拖动、页码跳转）。EPUB 支持左右翻页/滚动、目录跳转、字号、行距、字体与主题；两种格式都不跳外部 App |
 | **进度同步** | Calibre-Web Kobo 协议双向同步（拉取 + 推送），calibre-server 自动降级为本地保存 |
 | **检查更新** | GitHub Releases 版本检查（后台静默 + 手动）、APK 下载；**全程手动**：不弹窗、不自动安装、不自动跳系统设置页，每一步都在设置页「关于」里点按钮 |
 | **外观** | 墨紫（weknora-mobile）/ 晴蓝（AnyWords）两套配色 × 跟随系统 / 浅色 / 深色，设置页实时切换；统一大圆角、字体排版与卡片层次 |
 | **界面中文化** | Calibre-Web 官方模板 30 条分类文案 + calibre-server 常见导航 + 二级索引，客户端展示层翻译；未收录文案原样回退 |
+
+## v0.10.0：PDF 内置阅读 + 书库分组
+
+### PDF 不再跳到其它软件
+
+之前 `isReadableInApp` 只认 EPUB/KEPUB，PDF 下载完走 `ACTION_VIEW` 交给系统选择器。这一版新增独立的 `PdfReaderActivity`：
+
+- 用 Android 自带的 `android.graphics.pdf.PdfRenderer` 按页渲染，**不引入第三方 PDF 引擎、不增加 APK 体积**；渲染限制在单线程 dispatcher，位图宽度封顶 1440px 防 OOM。
+- 翻页：左右滑动、点屏幕左右两侧、上一页/下一页按钮、页码滑块；缩放按 `100% → 150% → 200% → 300%` 循环，放大后可拖动。
+- 进度按页保存在 Room（`{"pdfPage": n}`），Kobo 支持时按百分比推送；返回时自动续读。
+- 一键阅读优先级 `EPUB/KEPUB > PDF > 其它`，可读格式一律进内置阅读器；MOBI 等仍可交外部应用。
+
+### 书库按「文件夹」大概分个类
+
+Calibre 的数据模型里没有磁盘文件夹字段，OPDS 也不返回路径；**最接近文件夹的是标签**（Calibre-Web 官方 `feed.xml` 会为每本书输出 `<category term="标签" label="标签"/>`），其次是服务端自己的书架/分类目录。v0.8.0 为了「打开即见书」加了自动下钻，把分类树整页跳过了，所以书看起来全堆在一起。
+
+| 能力 | 说明 |
+|---|---|
+| 默认分组 | 有标签时默认「按标签」，否则依次退到作者 / 系列 / 出版社 / 语言 |
+| 维度切换 | 书库顶部「分类」下拉只列出真正能分成 ≥2 组的维度 |
+| 分组筛选 | 每组一个 chip（带数量），点一下只看该组；「全部」恢复 |
+| 分节网格 | 每组一个标题条 + 该组书籍，未分类永远排在最后 |
+| 全部分类 | 一键回到服务端根导航（书架 / 作者 / 类别 / 系列），不受自动直达影响 |
+| 系列识别 | Calibre-Web 把系列写在 `<content>` 的 `SERIES: 名称 [序号]` 行里，单独解析 |
+
+分组是纯展示层计算（`BookGroups.kt`），不改 `OpdsEntry`，不影响 `pickAllBooksShortcut()` 与点击链。新增 `BookGroupsTest.kt` 7 项单测（共 42 项）。
+
+> 如果你在 Calibre 里用的是「自定义列」当文件夹，或想严格按磁盘目录分，OPDS 拿不到这些信息 —— 走「全部分类」看服务端的书架导航，或告诉我具体字段名，我再补一维映射。
 
 ## v0.9.0：书库分类菜单中文化
 
@@ -186,7 +215,7 @@ PDF / MOBI / AZW3 / CBZ 仍走系统阅读器（Readium 的 PDF navigator 需要
 ```bash
 # 环境：JDK 17+、Android SDK 35、Gradle 8.14.2
 ./gradlew :app:assembleDebug        # 产物 app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:testDebugUnitTest    # 35 个单元测试：OPDS 解析 + Calibre-Web 官方模板回归 + 导航文案中文化 + Kobo 同步 + 版本比较 + 目录直达启发式
+./gradlew :app:testDebugUnitTest    # 42 个单元测试：OPDS 解析 + Calibre-Web 官方模板回归 + 导航文案中文化 + 书库分组 + PDF 格式判定 + Kobo 同步 + 版本比较 + 目录直达启发式
 ```
 
 `local.properties` 需指向本机 SDK：

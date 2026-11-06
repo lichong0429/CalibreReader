@@ -450,6 +450,9 @@ private fun BrowseRoute(
         onOpenFile = vm::openLocalFile,
         onClearDownload = vm::clearDownload,
         onClearMessage = vm::clearMessage,
-        onOpenServers = onOpenServers
+        onOpenServers = onOpenServers,
+        onGroupByChange = vm::setGroupBy,
+        onSelectGroup = vm::selectGroup,
+        onOpenRootCatalog = vm::openRootCatalog
     )
 }

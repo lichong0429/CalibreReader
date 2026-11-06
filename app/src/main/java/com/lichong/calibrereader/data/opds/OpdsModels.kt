@@ -34,8 +34,16 @@ enum class BookFormat(val mime: String, val label: String, val extension: String
     KEPUB("application/kepub+zip", "KEPUB", "kepub.epub"),
     OTHER("", "文件", "");
 
+    /** EPUB 可重排，优先级高于按页渲染的 PDF */
+    val readPriority: Int
+        get() = when (this) {
+            EPUB, KEPUB -> 0
+            PDF -> 1
+            else -> 9
+        }
+
     val isReadableInApp: Boolean
-        get() = this == EPUB || this == KEPUB
+        get() = this == EPUB || this == KEPUB || this == PDF
 
     companion object {
         fun fromMime(mime: String?): BookFormat {

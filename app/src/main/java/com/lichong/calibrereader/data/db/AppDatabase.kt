@@ -36,7 +36,9 @@ data class BookEntity(
     val locatorJson: String? = null
 ) {
     val isReadableInApp: Boolean
-        get() = format == "EPUB" || format == "KEPUB"
+        get() = format == "EPUB" || format == "KEPUB" || format == "PDF"
+
+    val isPdf: Boolean get() = format.equals("PDF", ignoreCase = true)
 }
 
 @Dao

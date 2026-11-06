@@ -44,6 +44,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import com.lichong.calibrereader.BuildConfig
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.opds.FeedKind
+import com.lichong.calibrereader.data.opds.GroupDimension
 import com.lichong.calibrereader.data.opds.OpdsEntry
 import com.lichong.calibrereader.data.opds.OpdsLabels
 import com.lichong.calibrereader.data.opds.OpdsLink
@@ -108,7 +110,10 @@ fun BrowseScreen(
     onOpenFile: (String) -> Unit,
     onClearDownload: () -> Unit,
     onClearMessage: () -> Unit,
-    onOpenServers: () -> Unit
+    onOpenServers: () -> Unit,
+    onGroupByChange: (GroupDimension) -> Unit,
+    onSelectGroup: (String?) -> Unit,
+    onOpenRootCatalog: () -> Unit
 ) {
     val snackbar = remember { SnackbarHostState() }
 
@@ -160,7 +165,14 @@ fun BrowseScreen(
 
                 state.feed?.kind == FeedKind.NAVIGATION -> NavList(state, onOpen, onLoadMore)
 
-                else -> BookGrid(state, onOpen, onLoadMore)
+                else -> BookGrid(
+                    state = state,
+                    onOpen = onOpen,
+                    onLoadMore = onLoadMore,
+                    onGroupByChange = onGroupByChange,
+                    onSelectGroup = onSelectGroup,
+                    onOpenRootCatalog = onOpenRootCatalog
+                )
             }
 
             if (state.loading && state.entries.isNotEmpty()) {
@@ -433,15 +445,126 @@ private fun QuickLinksRow(
     }
 }
 
+/** 书库页顶部的分组维度选择 + 分组筛选；「全部分类」直达服务端自己的分类树 */
+@Composable
+private fun GroupBar(
+    state: BrowseUiState,
+    onGroupByChange: (GroupDimension) -> Unit,
+    onSelectGroup: (String?) -> Unit,
+    onOpenRootCatalog: () -> Unit
+) {
+    var menu by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "分类",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(10.dp))
+            FilterChip(
+                selected = state.groupBy != GroupDimension.NONE,
+                onClick = { menu = true },
+                shape = RoundedCornerShape(12.dp),
+                label = { Text(state.groupBy.label) }
+            )
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                state.groupDimensions.forEach { dim ->
+                    DropdownMenuItem(
+                        text = { Text(dim.label) },
+                        onClick = { menu = false; onGroupByChange(dim) },
+                        leadingIcon = if (dim == state.groupBy) {
+                            { Icon(Icons.Default.Check, contentDescription = null) }
+                        } else null
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            if (state.rootCatalogAvailable) {
+                TextButton(onClick = onOpenRootCatalog) { Text("全部分类") }
+            }
+        }
+        if (state.groupBy != GroupDimension.NONE && state.allGroupSections.size >= 2) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = state.selectedGroup == null,
+                    onClick = { onSelectGroup(null) },
+                    shape = RoundedCornerShape(12.dp),
+                    label = { Text("全部 ${state.bookEntries.size}") }
+                )
+                state.allGroupSections.forEach { section ->
+                    FilterChip(
+                        selected = state.selectedGroup == section.name,
+                        onClick = { onSelectGroup(section.name) },
+                        shape = RoundedCornerShape(12.dp),
+                        label = {
+                            Text(
+                                "${section.name} ${section.books.size}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    )
+                }
+            }
+        }
+        if (state.groupBy != GroupDimension.NONE) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "分组依据服务端返回的元数据；想按书架/自定义列浏览，点「全部分类」。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun GroupHeader(name: String, count: Int) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                RoundedCornerShape(10.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            name,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            "$count 本",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+    }
+}
+
 @Composable
 private fun BookGrid(
     state: BrowseUiState,
     onOpen: (OpdsEntry) -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    onGroupByChange: (GroupDimension) -> Unit,
+    onSelectGroup: (String?) -> Unit,
+    onOpenRootCatalog: () -> Unit
 ) {
     // 混合 feed 里既有子目录又有书，目录单独成行，别把目录画成书封面
-    val navEntries = state.entries.filter { it.isNavigation }
-    val bookEntries = state.entries.filterNot { it.isNavigation }
+    val navEntries = state.navEntries
+    val bookEntries = state.bookEntries
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 112.dp),
         modifier = Modifier.fillMaxSize(),
@@ -449,6 +572,9 @@ private fun BookGrid(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            GroupBar(state, onGroupByChange, onSelectGroup, onOpenRootCatalog)
+        }
         if (navEntries.isNotEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column {
@@ -467,8 +593,22 @@ private fun BookGrid(
                 }
             }
         }
-        gridItems(bookEntries, key = { it.id }) { entry ->
-            BookCard(entry) { onOpen(entry) }
+        if (state.groupBy == GroupDimension.NONE) {
+            gridItems(bookEntries, key = { it.id }) { entry ->
+                BookCard(entry) { onOpen(entry) }
+            }
+        } else {
+            state.groupSections.forEach { section ->
+                item(key = "header:${section.name}", span = { GridItemSpan(maxLineSpan) }) {
+                    GroupHeader(section.name, section.books.size)
+                }
+                gridItems(
+                    section.books,
+                    key = { "${section.name}:${it.id}" }
+                ) { entry ->
+                    BookCard(entry) { onOpen(entry) }
+                }
+            }
         }
         if (state.nextUrl != null) {
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -631,7 +771,7 @@ private fun BookDetailSheet(
                 ) { Text("一键阅读") }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "已下载的书直接打开；没下载的会自动取 EPUB 并拉起内置阅读器。",
+                    "已下载的书直接打开；没下载的会自动取 EPUB/PDF 并在 App 内阅读，不跳其它软件。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
