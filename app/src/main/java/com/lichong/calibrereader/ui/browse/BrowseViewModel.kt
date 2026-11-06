@@ -8,6 +8,7 @@ import com.lichong.calibrereader.data.db.BookEntity
 import com.lichong.calibrereader.data.download.BookOpener
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.net.OpdsHttpException
+import com.lichong.calibrereader.data.opds.CatalogShortcut
 import com.lichong.calibrereader.data.opds.FeedKind
 import com.lichong.calibrereader.data.opds.OpdsEntry
 import com.lichong.calibrereader.data.opds.OpdsFeed
@@ -75,10 +76,15 @@ class BrowseViewModel(
     init {
         rootUrl = server.opdsRootUrl.ifBlank { server.baseUrl.trimEnd('/') + "/opds/" }
         stack.add(Crumb(rootUrl, ""))
-        load(rootUrl)
+        load(rootUrl, autoDive = true)
     }
 
-    private fun load(url: String) {
+    /**
+     * @param autoDive 只有自动直达链为 true：目录 feed 最多连续下钻两层，
+     *                 直到遇到真正含书籍的 feed。手动点分类、返回、刷新都不触发，
+     *                 避免用户自己进一个索引页时又被强行跳走。
+     */
+    private fun load(url: String, autoDive: Boolean = false) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
@@ -105,11 +111,16 @@ class BrowseViewModel(
                     )
                 }
 
-                // 首页若只是分类导航，自动进到「全部书籍」类目录；返回键可回到分类页
-                if (isRoot && stack.size == 1) {
-                    pickAllBooksShortcut(resp.feed)?.let { shortcut ->
+                // 根 feed 若只是分类导航，自动进到返回书籍的入口；返回键可逐层回退。
+                // 某些服务端（Calibre-Web 的 A-Z 索引）第一层仍是目录，再钻一层。
+                if (autoDive && stack.size <= 2 && resp.feed.kind == FeedKind.NAVIGATION) {
+                    val shortcut = pickAllBooksShortcut(resp.feed)
+                        ?: resp.feed.entries.firstNotNullOfOrNull { e ->
+                            e.navigationHref?.let { CatalogShortcut(it, e.title) }
+                        }
+                    if (shortcut != null && shortcut.href != url) {
                         stack.add(Crumb(shortcut.href, shortcut.title))
-                        viewModelScope.launch { load(shortcut.href) }
+                        viewModelScope.launch { load(shortcut.href, autoDive = true) }
                     }
                 }
             } catch (e: Exception) {
@@ -132,13 +143,18 @@ class BrowseViewModel(
             select(entry)
             return
         }
-        val nav = entry.navLinks.firstOrNull()
+        val nav = entry.navigationHref
         if (nav == null) {
-            _state.update { it.copy(message = "该条目没有可打开的内容") }
+            _state.update {
+                it.copy(
+                    message = "服务端没有给「${entry.title}」返回目录链接" +
+                        "（共 ${entry.links.size} 个 link）"
+                )
+            }
             return
         }
-        stack.add(Crumb(nav.href, entry.title))
-        load(nav.href)
+        stack.add(Crumb(nav, entry.title))
+        load(nav)
     }
 
     fun back(): Boolean {

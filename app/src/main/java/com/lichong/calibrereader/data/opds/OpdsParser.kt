@@ -52,6 +52,12 @@ object OpdsParser {
 
         val links = feedLinks.mapNotNull { parseLink(it, baseUrl) }
         val entries = entryElements.mapIndexedNotNull { i, el -> parseEntry(el, baseUrl, i) }
+        // Calibre-Web 根 feed 有两个 rel="search"：第一个是 OpenSearch 描述文档
+        // (application/opensearchdescription+xml)，第二个才是带 {searchTerms} 的模板。
+        // 优先取含占位符的那个，否则搜索会打到描述文件上。
+        val searchLinks = links.filter { it.rel == OpdsRel.SEARCH && it.href.isNotBlank() }
+        val searchTemplate = (searchLinks.firstOrNull { it.href.contains("{searchTerms}") }
+            ?: searchLinks.firstOrNull())?.href
         val facets = feedLinks
             .filter { it.attr("rel") == OpdsRel.FACET }
             .mapNotNull { parseFacet(it, baseUrl) }
@@ -66,7 +72,7 @@ object OpdsParser {
             upUrl = links.firstOrNull { it.rel == "up" }?.href,
             nextUrl = links.firstOrNull { it.rel == "next" }?.href,
             prevUrl = links.firstOrNull { it.rel == "prev" }?.href,
-            searchTemplate = links.firstOrNull { it.rel == OpdsRel.SEARCH && it.href.isNotBlank() }?.href,
+            searchTemplate = searchTemplate,
             entries = entries,
             facets = facets
         )

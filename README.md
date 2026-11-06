@@ -2,14 +2,14 @@
 
 自建 Calibre 服务的 Android 客户端。**calibre-server（官方内容服务器）与 Calibre-Web 双兼容**，全部走 OPDS 1.2 协议，不硬编码任何服务端路由；内置 Readium 阅读器，不再依赖第三方阅读 App。
 
-## 已实现（v0.7.0）
+## 已实现（v0.8.0）
 
 | 模块 | 说明 |
 |---|---|
 | 服务器管理 | 多服务器保存、地址自动补全、OPDS 路径自动探测（`/opds/`、`/opds`、`/opds/v1.2/catalog`）、服务类型识别 |
 | 认证 | HTTP Basic；密码用 AndroidKeyStore AES-GCM 加密后落盘 |
 | 网络兼容 | 明文 HTTP、自签证书开关、连接超时友好提示 |
-| 书库浏览 | 打开即见书（自动进入全库目录）、OPDS 导航栈、快捷分类、分页自动加载、全库搜索（OpenSearch 模板沿用根目录） |
+| 书库浏览 | **兼容 Calibre-Web 无 `rel` 的导航链接**、打开即见书（自动下钻至书籍 feed，最多两层）、OPDS 导航栈、快捷分类、分页自动加载、全库搜索（OpenSearch 模板优先取含 `{searchTerms}` 的链接） |
 | 一键阅读 | 已下载的书直接打开；未下载自动取 EPUB 下载并拉起内置阅读器 |
 | 封面 | 带认证加载 + 内存 LRU + OkHttp 磁盘缓存，无封面显示书名占位 |
 | 书籍详情 | 元数据（作者/出版社/语言/日期/标签）、简介、多格式列表与文件大小 |
@@ -19,6 +19,26 @@
 | **进度同步** | Calibre-Web Kobo 协议双向同步（拉取 + 推送），calibre-server 自动降级为本地保存 |
 | **检查更新** | GitHub Releases 版本检查（后台静默 + 手动）、APK 下载；**全程手动**：不弹窗、不自动安装、不自动跳系统设置页，每一步都在设置页「关于」里点按钮 |
 | **外观** | 墨紫（weknora-mobile）/ 晴蓝（AnyWords）两套配色 × 跟随系统 / 浅色 / 深色，设置页实时切换；统一大圆角、字体排版与卡片层次 |
+
+## v0.8.0：真正修好「书库点不开」——OPDS 导航链接识别
+
+拿到真机截图后才定位到真正的根因，前三轮（v0.4.0 / v0.5.0 / v0.7.0）都在查导航状态与自动弹窗，方向不对。截图显示：`v0.7.0` 已经装上了，画面其实是**书库的 OPDS 根分类目录**（一列带 `>` 的条目，看起来像 Android 设置菜单），底部 Toast 是「该条目没有可打开的内容」。
+
+| 事实 | 说明 |
+|---|---|
+| Calibre-Web `cps/templates/index.xml` | 根导航 entry 写作 `<link href="/opds/books" type="application/atom+xml;profile=opds-catalog"/>` —— **没有 `rel` 属性** |
+| 旧实现 `navLinks` | 只认 `rel == "subsection"`，于是根节点所有分类的 `navLinks` 恒为空 |
+| 后果 | 点任何分类都弹「该条目没有可打开的内容」；`pickAllBooksShortcut` 也依赖 `navLinks`，自动直达同样失效 → 永远卡在分类页，看不到书 |
+
+> 旧单测里「Calibre-Web 结构解析」自己臆造了 `rel="subsection"`，所以一直没暴露这个差异。这次按官方模板原文补了回归用例。
+
+修复：
+
+- `OpdsLink` 增加 `isCatalogFeed` / `isAcquisition` / `isImage` / `isFeedControl`；`navLinks` 兼容显式 `subsection`/`collection` 与「按 MIME type 识别的 Atom/OPDS 目录链接」；新增 `navigationHref` 兜底，杜绝「点不开」的死路。
+- 自动直达改为**最多连续下钻两层直到见到书籍 feed**（只在自动链上生效，用户手动点分类不会被强行跳走）；优先级兼顾 calibre-server 的「By Title」（全量）与 Calibre-Web 的「Recently added Books」（直接返回书籍 feed）—— 后者的「Alphabetical Books」其实是 A–Z 字母索引，直达它仍然看不到书。
+- 搜索模板：Calibre-Web 根 feed 有两个 `rel="search"`，第一个是 OpenSearch 描述文档、第二个才带 `{searchTerms}`；改为优先取含占位符的链接。
+- 界面消歧：根目录顶栏标题明确写「书库」，左上角齿轮移到右上角；分类页顶部加「这是书库的分类，不是设置」说明；无链接的条目标红显示「无链接」而不是画一个假箭头。
+- 本版在 **Android 模拟器 + 本地模拟 Calibre-Web OPDS 服务**上完成实测（见交付说明）；`mock_opds_server.py` 保留在工作区可复现。
 
 ## v0.7.0：拆掉「自动挡路」，并让版本可自检
 
@@ -146,7 +166,7 @@ PDF / MOBI / AZW3 / CBZ 仍走系统阅读器（Readium 的 PDF navigator 需要
 ```bash
 # 环境：JDK 17+、Android SDK 35、Gradle 8.14.2
 ./gradlew :app:assembleDebug        # 产物 app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:testDebugUnitTest    # 23 个单元测试：OPDS 解析 + Kobo 同步 + 版本比较 + 目录直达启发式
+./gradlew :app:testDebugUnitTest    # 28 个单元测试：OPDS 解析 + Calibre-Web 官方模板回归 + Kobo 同步 + 版本比较 + 目录直达启发式
 ```
 
 `local.properties` 需指向本机 SDK：
@@ -200,7 +220,8 @@ app/src/main/java/com/lichong/calibrereader/
 - 内置阅读器只覆盖 EPUB/KEPUB；PDF 需另加 `io.legere:pdfiumandroid`
 - 进度同步仅 Calibre-Web（需 Kobo 令牌），不支持官方 calibre-server
 - 阅读偏好为全局共享，不按书单独记忆
-- 未做真机验证（开发环境无连接设备）；`AndroidView` 承载 Readium Fragment、未知来源授权返回续装等仍待实机确认
+- **v0.8.0 已在 Android 模拟器（AVD wk34 / Android 34 x86_64）实测**：安装启动、书库为默认页、保存服务器后自动直达书封面网格、返回分类页、点分类进入下一级、第二层再进书列表，全程无「该条目没有可打开的内容」。测试用的本地模拟服务见工作区 `mock_opds_server.py`
+- 实体手机仍未验证；`AndroidView` 承载 Readium Fragment、内置阅读器打开 EPUB、未知来源授权返回续装等仍待实机确认
 - 「自动直达书籍列表」靠 OPDS 根导航条目标题匹配（中英文关键字）；服务端若用了完全不同的命名，会停在分类页，可用快捷入口手动进入
 - 自更新依赖 GitHub 可达；GitHub API 匿名限流 60 次/小时（12h 节流远低于此）
 - Debug 签名，仅自用。若换正式签名，必须先在设备上卸载旧版，否则安装器会拒绝覆盖

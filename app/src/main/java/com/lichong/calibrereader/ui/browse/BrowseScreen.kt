@@ -232,20 +232,18 @@ private fun BrowseTopBar(
     } else {
         TopAppBar(
             navigationIcon = {
+                // 根目录不放齿轮：左上角齿轮 + 一列带箭头的目录，
+                // 会被误认成「设置页面」。服务器设置移到右上角。
                 if (state.canGoBack) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回分类目录")
-                    }
-                } else {
-                    IconButton(onClick = onOpenServers) {
-                        Icon(Icons.Default.Settings, contentDescription = "服务器设置")
                     }
                 }
             },
             title = {
                 Column {
                     Text(
-                        state.title.ifBlank { server.displayName },
+                        if (state.crumbs.size <= 1) "书库" else state.title.ifBlank { "书库目录" },
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -313,6 +311,9 @@ private fun BrowseTopBar(
                 IconButton(onClick = onRefresh) {
                     Icon(Icons.Default.Refresh, contentDescription = "刷新")
                 }
+                IconButton(onClick = onOpenServers) {
+                    Icon(Icons.Default.Settings, contentDescription = "服务器设置")
+                }
             }
         )
     }
@@ -328,6 +329,27 @@ private fun NavList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
+        if (state.isRootCatalog) {
+            item {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        "书库目录",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        "这是书库的分类，不是设置。点任意一项进入书籍列表",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
         if (state.isRootCatalog && state.entries.size > 1) {
             item { QuickLinksRow(state.entries, onOpen) }
             item { HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) }
@@ -353,7 +375,15 @@ private fun NavList(
                     }
                 },
                 trailingContent = {
-                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
+                    if (entry.navigationHref != null) {
+                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = "进入该分类")
+                    } else {
+                        Text(
+                            "无链接",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 },
                 modifier = Modifier.clickable { onOpen(entry) }
             )

@@ -12,6 +12,8 @@ object OpdsRel {
     const val THUMBNAIL = "http://opds-spec.org/image/thumbnail"
     const val FACET = "http://opds-spec.org/facet"
     const val SUBSECTION = "subsection"
+    const val SUBSECTION_URI = "http://opds-spec.org/subsection"
+    const val COLLECTION = "collection"
     const val SEARCH = "search"
     const val SORT_NEW = "http://opds-spec.org/sort/new"
     const val SORT_POPULAR = "http://opds-spec.org/sort/popular"
@@ -67,6 +69,29 @@ data class OpdsLink(
 ) {
     val format: BookFormat get() = BookFormat.fromMime(type).takeIf { it != BookFormat.OTHER }
         ?: BookFormat.fromUrl(href)
+
+    /** 是否指向另一个 OPDS/Atom 目录 feed（而非电子书文件或封面图片）。 */
+    val isCatalogFeed: Boolean
+        get() {
+            val t = type.orEmpty()
+            if (t.contains("opds-catalog", ignoreCase = true)) return true
+            return when (t.substringBefore(';').trim().lowercase()) {
+                "application/atom+xml", "application/opds+json" -> true
+                else -> false
+            }
+        }
+
+    val isAcquisition: Boolean
+        get() = rel == OpdsRel.ACQUISITION || rel.startsWith(OpdsRel.ACQUISITION + "/")
+
+    val isImage: Boolean
+        get() = rel == OpdsRel.IMAGE || rel == OpdsRel.THUMBNAIL
+
+    /** feed 级别的控制链接，不应被当作「点进去看下一层」的目标 */
+    val isFeedControl: Boolean
+        get() = rel.lowercase() in setOf(
+            "self", "start", "up", "next", "prev", "previous", "first", "last", "search"
+        )
 }
 
 data class OpdsEntry(
@@ -84,13 +109,38 @@ data class OpdsEntry(
     val identifier: String? = null
 ) {
     val acquisitionLinks: List<OpdsLink>
-        get() = links.filter {
-            it.rel == OpdsRel.ACQUISITION ||
-                it.rel.startsWith(OpdsRel.ACQUISITION + "/")
+        get() = links.filter { it.isAcquisition }
+
+    /**
+     * 子目录链接。
+     *
+     * 关键兼容点：Calibre-Web 的 `cps/templates/index.xml` 里，根导航 entry 写作
+     * `<link href="/opds/booksindex" type="application/atom+xml;profile=opds-catalog"/>`，
+     * **没有 rel 属性**。只认 `rel="subsection"` 会让整页分类都无法打开
+     * （表现为「该条目没有可打开的内容」），因此按 MIME type 兜底识别目录 feed。
+     */
+    val navLinks: List<OpdsLink>
+        get() = links.filter { link ->
+            when {
+                link.rel == OpdsRel.SUBSECTION ||
+                    link.rel == OpdsRel.SUBSECTION_URI ||
+                    link.rel == OpdsRel.COLLECTION -> true
+
+                link.isImage || link.isAcquisition || link.isFeedControl -> false
+                link.isCatalogFeed -> true
+                else -> false
+            }
         }
 
-    val navLinks: List<OpdsLink>
-        get() = links.filter { it.rel == OpdsRel.SUBSECTION }
+    /** 点击目录条目时的目标地址；navLinks 为空时保守兜底，避免死路。 */
+    val navigationHref: String?
+        get() = navLinks.firstOrNull()?.href
+            ?: links.firstOrNull { link ->
+                !link.isImage && !link.isAcquisition && !link.isFeedControl &&
+                    link.href.isNotBlank() &&
+                    (link.isCatalogFeed || link.type.isNullOrBlank()) &&
+                    !BOOK_EXT_RE.containsMatchIn(link.href)
+            }?.href
 
     val imageLink: OpdsLink?
         get() = links.firstOrNull { it.rel == OpdsRel.IMAGE }
@@ -106,7 +156,7 @@ data class OpdsEntry(
         get() = (imageLink ?: thumbnailLink)?.href
 
     val isNavigation: Boolean
-        get() = acquisitionLinks.isEmpty() && navLinks.isNotEmpty()
+        get() = acquisitionLinks.isEmpty() && navigationHref != null
 
     val isBook: Boolean
         get() = acquisitionLinks.isNotEmpty()
@@ -151,6 +201,10 @@ data class OpdsEntry(
     companion object {
         private val UUID_RE = Regex(
             """([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"""
+        )
+        private val BOOK_EXT_RE = Regex(
+            """\.(epub|kepub|pdf|mobi|azw3|cbz|cbr|fb2|txt|djvu)(\?|$)""",
+            RegexOption.IGNORE_CASE
         )
     }
 }
