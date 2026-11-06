@@ -79,6 +79,7 @@ import com.lichong.calibrereader.BuildConfig
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.opds.FeedKind
 import com.lichong.calibrereader.data.opds.OpdsEntry
+import com.lichong.calibrereader.data.opds.OpdsLabels
 import com.lichong.calibrereader.data.opds.OpdsLink
 import com.lichong.calibrereader.ui.LoadingBox
 import com.lichong.calibrereader.ui.MessageState
@@ -243,7 +244,8 @@ private fun BrowseTopBar(
             title = {
                 Column {
                     Text(
-                        if (state.crumbs.size <= 1) "书库" else state.title.ifBlank { "书库目录" },
+                        if (state.crumbs.size <= 1) "书库"
+                        else OpdsLabels.title(state.title).ifBlank { "书库目录" },
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -357,18 +359,18 @@ private fun NavList(
         listItems(state.entries, key = { it.id }) { entry ->
             ListItem(
                 headlineContent = {
-                    Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(OpdsLabels.title(entry.title), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 },
                 supportingContent = entry.summary?.takeIf { it.isNotBlank() }?.let { text ->
                     {
-                        Text(text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(OpdsLabels.description(text), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 },
                 leadingContent = entry.coverUrl?.let { url ->
                     {
                         RemoteCover(
                             url = url,
-                            fallbackText = entry.title,
+                            fallbackText = OpdsLabels.title(entry.title),
                             contentDescription = null,
                             modifier = Modifier.size(36.dp, 50.dp)
                         )
@@ -420,7 +422,7 @@ private fun QuickLinksRow(
                     shape = RoundedCornerShape(12.dp),
                     label = {
                         Text(
-                            entry.title,
+                            OpdsLabels.title(entry.title),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -453,7 +455,7 @@ private fun BookGrid(
                     navEntries.forEach { entry ->
                         ListItem(
                             headlineContent = {
-                                Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(OpdsLabels.title(entry.title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
                             trailingContent = {
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)

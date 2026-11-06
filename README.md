@@ -2,7 +2,7 @@
 
 自建 Calibre 服务的 Android 客户端。**calibre-server（官方内容服务器）与 Calibre-Web 双兼容**，全部走 OPDS 1.2 协议，不硬编码任何服务端路由；内置 Readium 阅读器，不再依赖第三方阅读 App。
 
-## 已实现（v0.8.0）
+## 已实现（v0.9.0）
 
 | 模块 | 说明 |
 |---|---|
@@ -19,6 +19,26 @@
 | **进度同步** | Calibre-Web Kobo 协议双向同步（拉取 + 推送），calibre-server 自动降级为本地保存 |
 | **检查更新** | GitHub Releases 版本检查（后台静默 + 手动）、APK 下载；**全程手动**：不弹窗、不自动安装、不自动跳系统设置页，每一步都在设置页「关于」里点按钮 |
 | **外观** | 墨紫（weknora-mobile）/ 晴蓝（AnyWords）两套配色 × 跟随系统 / 浅色 / 深色，设置页实时切换；统一大圆角、字体排版与卡片层次 |
+| **界面中文化** | Calibre-Web 官方模板 30 条分类文案 + calibre-server 常见导航 + 二级索引，客户端展示层翻译；未收录文案原样回退 |
+
+## v0.9.0：书库分类菜单中文化
+
+服务端 OPDS 返回的分类标题是英文（`Alphabetical Books` / `Hot Books` / `Categories` ...），手机上看不友好。这一版在客户端做展示层翻译：
+
+| 覆盖 | 内容 |
+|---|---|
+| Calibre-Web | 官方 `cps/templates/index.xml` 的 **30 条文案**（15 个分类标题 + 15 条描述）全部有中文 |
+| calibre-server | `By Newest` / `By Title` / `By Author` / `By Series` / `By Tag` 等常见导航 |
+| 二级索引 | `All` → 全部、`All Books` → 全部书籍；A–Z 单字母保留 |
+| 出现位置 | 分类列表、快捷入口 chips、混合 feed 的目录行、顶栏标题与面包屑、分类描述、封面占位文字 |
+
+设计边界：
+
+- **只改展示，不改数据**：`OpdsEntry.title` 保留服务端原文，`ServerProbe.detectKind()` 与 `pickAllBooksShortcut()` 仍靠英文标题判断；映射只发生在 Composable 里。
+- **不翻译内容数据**：书名、作者、简介、标签、用户自定义分类原样显示；未收录文案原样回退（服务端本来就是中文时不受影响）。
+- 归一化匹配：忽略大小写、多余空白与句末标点。
+
+另兼容部分版本省略 `from this catalog` 的描述变体，以及 `Search Results` 等 feed 标题。新增 `data/opds/OpdsLabels.kt` 纯函数 + `OpdsLabelsTest.kt` 7 项单测（共 35 项）。
 
 ## v0.8.0：真正修好「书库点不开」——OPDS 导航链接识别
 
@@ -166,7 +186,7 @@ PDF / MOBI / AZW3 / CBZ 仍走系统阅读器（Readium 的 PDF navigator 需要
 ```bash
 # 环境：JDK 17+、Android SDK 35、Gradle 8.14.2
 ./gradlew :app:assembleDebug        # 产物 app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:testDebugUnitTest    # 28 个单元测试：OPDS 解析 + Calibre-Web 官方模板回归 + Kobo 同步 + 版本比较 + 目录直达启发式
+./gradlew :app:testDebugUnitTest    # 35 个单元测试：OPDS 解析 + Calibre-Web 官方模板回归 + 导航文案中文化 + Kobo 同步 + 版本比较 + 目录直达启发式
 ```
 
 `local.properties` 需指向本机 SDK：
