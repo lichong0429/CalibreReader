@@ -86,6 +86,7 @@ fun ServerListScreen(
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
     onRetryInstall: () -> Unit,
+    onGrantPermission: () -> Unit,
     onBack: () -> Unit,
     onOpenLibrary: () -> Unit,
     onUse: (ServerConfig) -> Unit
@@ -147,7 +148,8 @@ fun ServerListScreen(
                         state = updateState,
                         onCheck = onCheckUpdate,
                         onDownload = onDownloadUpdate,
-                        onRetryInstall = onRetryInstall
+                        onRetryInstall = onRetryInstall,
+                        onGrantPermission = onGrantPermission
                     )
                 }
             }
@@ -180,7 +182,8 @@ fun ServerListScreen(
                         state = updateState,
                         onCheck = onCheckUpdate,
                         onDownload = onDownloadUpdate,
-                        onRetryInstall = onRetryInstall
+                        onRetryInstall = onRetryInstall,
+                        onGrantPermission = onGrantPermission
                     )
                 }
             }

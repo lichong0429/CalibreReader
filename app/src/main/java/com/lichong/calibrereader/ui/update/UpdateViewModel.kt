@@ -23,8 +23,6 @@ data class UpdateUiState(
     /** 一次性提示（"已是最新版本"等），展示后调 clearMessage 清掉 */
     val message: String? = null,
     val error: String? = null,
-    /** 启动时静默发现新版才弹的对话框 */
-    val promptVisible: Boolean = false,
     /** 已下载完但缺「安装未知应用」授权 */
     val permissionNeeded: Boolean = false,
 ) {
@@ -44,7 +42,7 @@ class UpdateViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(UpdateUiState())
     val state: StateFlow<UpdateUiState> = _state.asStateFlow()
 
-    /** 启动时调用：距上次检查超过 12h 才真正发请求，且只在有新版时弹窗 */
+    /** 启动时调用：距上次检查超过 12h 才真正发请求。纯静默，绝不弹窗、绝不跳转。 */
     fun checkSilent() {
         if (_state.value.stage != UpdateUiState.Stage.Idle) return
         val last = prefs.getLong(KEY_LAST_CHECK, 0L)
@@ -89,7 +87,8 @@ class UpdateViewModel(private val container: AppContainer) : ViewModel() {
                             it.copy(
                                 stage = UpdateUiState.Stage.Available,
                                 info = r.info,
-                                promptVisible = silent,
+                                // 永远不自动弹窗：模态 Dialog 会吃掉整屏点击，
+                                // 表现就是「所有条目都点不了」。新版本只在设置页「关于」里提示。
                                 message = if (silent) null else "发现新版本 v${r.info.version}"
                             )
                         }
@@ -118,8 +117,7 @@ class UpdateViewModel(private val container: AppContainer) : ViewModel() {
                 downloaded = 0L,
                 total = info.sizeBytes,
                 error = null,
-                message = null,
-                promptVisible = false
+                message = null
             )
         }
         viewModelScope.launch {
@@ -134,10 +132,11 @@ class UpdateViewModel(private val container: AppContainer) : ViewModel() {
                             stage = UpdateUiState.Stage.Downloaded,
                             downloaded = file.length(),
                             total = file.length(),
-                            message = "下载完成，准备安装"
+                            message = "安装包已就绪，请在「关于」里点「安装」"
                         )
                     }
-                    installDownloaded()
+                    // 刻意不自动拉起安装器：自动跳转会让用户一回到 App 就被弹走，
+                    // 看起来就像「界面卡住、所有条目都点不了」。安装的每一步都由用户点按钮触发。
                 },
                 onFailure = { e ->
                     _state.update {
@@ -148,30 +147,42 @@ class UpdateViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** 只有用户显式点「安装 / 继续安装」才会走到这里。 */
     private fun installDownloaded() {
         val info = _state.value.info ?: return
         val ctx = container.appContext
         val apk = java.io.File(container.updateCacheDir, "CalibreReader-${info.version}.apk")
         if (ApkInstaller.needsInstallPermission(ctx)) {
-            _state.update { it.copy(permissionNeeded = true) }
-            ApkInstaller.openInstallPermissionSettings(ctx)
+            // 绝不自动跳系统的「安装未知应用」设置页 —— 那个页面看起来就像
+            // 「App 卡在设置界面」，而且用户一返回又会被弹回去。只给提示 + 显式按钮。
+            _state.update {
+                it.copy(
+                    permissionNeeded = true,
+                    error = "需要先允许本应用安装 APK，请在下方点「去授权」"
+                )
+            }
             return
         }
         val err = ApkInstaller.install(ctx, apk)
         if (err != null) {
             _state.update { it.copy(error = err) }
         } else {
-            _state.update { it.copy(permissionNeeded = false) }
+            _state.update { it.copy(permissionNeeded = false, error = null) }
         }
     }
 
-    /** 从授权页返回后重试安装 */
+    /** 用户显式点「安装」或授权后回来点「继续安装」。绝不自动触发。 */
     fun retryInstall() {
         if (_state.value.stage != UpdateUiState.Stage.Downloaded) return
         installDownloaded()
     }
 
-    fun dismissPrompt() = _state.update { it.copy(promptVisible = false) }
+    /** 用户显式点「去授权」才跳系统设置页。 */
+    fun grantInstallPermission() {
+        if (!ApkInstaller.openInstallPermissionSettings(container.appContext)) {
+            _state.update { it.copy(error = "无法打开授权页，请在系统设置里搜索「安装未知应用」") }
+        }
+    }
 
     fun clearMessage() = _state.update { it.copy(message = null, error = null) }
 

@@ -7,14 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -43,7 +39,8 @@ fun AboutCard(
     state: UpdateUiState,
     onCheck: () -> Unit,
     onDownload: () -> Unit,
-    onRetryInstall: () -> Unit
+    onRetryInstall: () -> Unit,
+    onGrantPermission: () -> Unit
 ) {
     var notesExpanded by remember { mutableStateOf(false) }
 
@@ -75,6 +72,12 @@ fun AboutCard(
             Text(
                 "CalibreReader · OPDS 浏览与内置 EPUB 阅读器",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "更新全程手动，不会自动弹窗或跳转",
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -144,7 +147,7 @@ fun AboutCard(
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = onDownload) { Text("下载并安装") }
+                        TextButton(onClick = onDownload) { Text("下载安装包") }
                     }
                 }
 
@@ -163,19 +166,32 @@ fun AboutCard(
                 UpdateUiState.Stage.Downloaded -> Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "已下载，等待安装",
+                            "安装包已就绪",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = onRetryInstall) { Text("继续安装") }
+                        TextButton(onClick = onRetryInstall) { Text("安装") }
                     }
-                    if (state.permissionNeeded) {
+                    if (!state.error.isNullOrBlank()) {
+                        Spacer(Modifier.height(4.dp))
                         Text(
-                            "需要在系统设置里允许本应用安装 APK，授权后回来点「继续安装」",
+                            state.error!!,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
+                    }
+                    if (state.permissionNeeded) {
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "需先允许本应用安装 APK",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onGrantPermission) { Text("去授权") }
+                        }
                     }
                 }
             }
@@ -183,36 +199,3 @@ fun AboutCard(
     }
 }
 
-/** 启动静默检查发现新版本时弹的框 */
-@Composable
-fun UpdatePromptDialog(
-    state: UpdateUiState,
-    onDismiss: () -> Unit,
-    onUpdate: () -> Unit
-) {
-    val info = state.info ?: return
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("发现新版本 v${info.version}") },
-        text = {
-            Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                Text(
-                    "当前 v${state.currentVersion} → 新版本 v${info.version}" +
-                        if (info.sizeBytes > 0) "（${formatSize(info.sizeBytes)}）" else "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (info.notes.isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(info.notes, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onUpdate) { Text("立即更新") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("稍后") }
-        }
-    )
-}

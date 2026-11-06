@@ -1,5 +1,8 @@
 package com.lichong.calibrereader.ui
 
+import android.content.Context
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,11 +51,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -68,7 +70,6 @@ import com.lichong.calibrereader.ui.server.ServerEditDialog
 import com.lichong.calibrereader.ui.server.ServerListScreen
 import com.lichong.calibrereader.ui.theme.AppButtonShape
 import com.lichong.calibrereader.ui.theme.AppCardShape
-import com.lichong.calibrereader.ui.update.UpdatePromptDialog
 import com.lichong.calibrereader.ui.update.UpdateViewModel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -125,23 +126,55 @@ fun AppRoot(container: AppContainer) {
     )
     val updateState by updateVm.state.collectAsStateWithLifecycle()
 
-    // 启动静默检查（12h 节流，只有发现新版才弹窗）
+    // 启动静默检查：12h 节流、纯后台。绝不弹窗、绝不跳转、绝不自动安装。
     LaunchedEffect(Unit) { updateVm.checkSilent() }
-    // 从「安装未知应用」授权页返回后继续安装
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { updateVm.retryInstall() }
 
-    if (updateState.promptVisible && updateState.info != null) {
-        UpdatePromptDialog(
-            state = updateState,
-            onDismiss = updateVm::dismissPrompt,
-            onUpdate = updateVm::download
-        )
+    // 版本变化时提示一次。Toast 不受任何界面遮挡影响，
+    // 用来 100% 确认手机上装的到底是哪一个包 —— 之前三次「还是不行」都缺这个判据。
+    val bootContext = LocalContext.current
+    LaunchedEffect(Unit) {
+        val sp = bootContext.getSharedPreferences("boot_prefs", Context.MODE_PRIVATE)
+        if (sp.getString("last_boot_version", null) != BuildConfig.VERSION_NAME) {
+            Toast.makeText(
+                bootContext,
+                "CalibreReader v${BuildConfig.VERSION_NAME} 已启动 · 书库就绪",
+                Toast.LENGTH_LONG
+            ).show()
+            sp.edit().putString("last_boot_version", BuildConfig.VERSION_NAME).apply()
+        }
     }
+
+    // 任何非书库页面按返回键都回书库，绝不把人困在设置页。
+    BackHandler(enabled = tab != TAB_BROWSE) { tab = TAB_BROWSE }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             Column {
+                // 常驻版本标识：不管落在哪个页面，都能一眼看出装的是哪一版。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 16.dp, vertical = 3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Calibre 阅读 v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        when (tab) {
+                            TAB_BROWSE -> "当前：书库"
+                            TAB_LIBRARY -> "当前：书架"
+                            else -> "当前：设置"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
                 HorizontalDivider(
                     thickness = 0.5.dp,
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
@@ -214,6 +247,7 @@ fun AppRoot(container: AppContainer) {
                     onCheckUpdate = updateVm::checkManual,
                     onDownloadUpdate = updateVm::download,
                     onRetryInstall = updateVm::retryInstall,
+                    onGrantPermission = updateVm::grantInstallPermission,
                     onBack = {},
                     onOpenLibrary = { tab = TAB_BROWSE },
                     onUse = { cfg: ServerConfig ->
