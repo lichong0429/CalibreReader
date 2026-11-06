@@ -186,4 +186,36 @@ class OpdsParserTest {
         assertNull(entry.koboUuid)
         assertEquals("42", entry.calibreId)
     }
+
+    /** 真实 Calibre-Web 库里遇到：元数据残留 \u0000 / \u0007，DOM 会整页拒绝解析 */
+    @Test
+    fun `脏元数据里的 C0 控制字符不会让整页解析失败`() {
+        val nul = "\u0000"
+        val bel = "\u0007"
+        val xml = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <title>Calibre-Web</title>
+              <entry>
+                <title>怎样做文献综述 六步走向成功$nul</title>
+                <id>urn:uuid:8d107db7-8895-4009-8abb-41da2acc0abc</id>
+                <author><name>劳伦斯·马奇$nul</name></author>
+                <link rel="http://opds-spec.org/acquisition" href="/opds/download/1/pdf/" type="application/pdf"/>
+              </entry>
+              <entry>
+                <title>Garbled</title>
+                <id>urn:uuid:7f39fa21-3a8b-434e-a8b7-9596b7f2ebf7</id>
+                <author><name>N$bel</name></author>
+                <link rel="http://opds-spec.org/acquisition" href="/opds/download/2/pdf/" type="application/pdf"/>
+              </entry>
+            </feed>
+        """.trimIndent()
+        val feed = parse(xml)
+        assertEquals(2, feed.entries.size)
+        assertEquals("怎样做文献综述 六步走向成功", feed.entries[0].title)
+        assertEquals(listOf("劳伦斯·马奇"), feed.entries[0].authors)
+        assertEquals(listOf("N"), feed.entries[1].authors)
+        assertEquals(BookFormat.PDF, feed.entries[0].acquisitionLinks.first().format)
+        assertEquals("http://192.168.1.10:8080/opds/download/1/pdf/", feed.entries[0].acquisitionLinks.first().href)
+    }
 }

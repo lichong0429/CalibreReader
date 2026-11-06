@@ -15,7 +15,8 @@ enum class GroupDimension(val label: String) {
     AUTHOR("按作者"),
     SERIES("按系列"),
     PUBLISHER("按出版社"),
-    LANGUAGE("按语言");
+    LANGUAGE("按语言"),
+    FORMAT("按格式");
 
     companion object {
         fun fromName(name: String): GroupDimension =
@@ -66,6 +67,9 @@ object BookGroups {
         GroupDimension.SERIES -> clean(seriesOf(entry))
         GroupDimension.PUBLISHER -> clean(entry.publisher)
         GroupDimension.LANGUAGE -> clean(entry.language)
+        // MIME 是 OPDS 里最可靠的字段：Calibre-Web 的下载链接常常不带扩展名
+        GroupDimension.FORMAT -> entry.acquisitionLinks.firstOrNull()?.format?.label
+            ?.takeIf { it.isNotBlank() } ?: UNKNOWN
     }
 
     fun sections(books: List<OpdsEntry>, dimension: GroupDimension): List<BookSection> {
@@ -85,15 +89,31 @@ object BookGroups {
         }
     }
 
-    /** 打开书库时的默认维度：标签最接近「文件夹」，其次作者/系列 */
+    /** 该维度下能归到具体分组（而非「未分类」）的书占比 */
+    fun coverage(books: List<OpdsEntry>, dimension: GroupDimension): Float {
+        if (books.isEmpty()) return 0f
+        return books.count { keyOf(it, dimension) != UNKNOWN }.toFloat() / books.size
+    }
+
+    /**
+     * 打开书库时的默认维度。标签齐全时它最像「文件夹」；但很多自建库是从 PDF 批量导入的，
+     * 标签稀疏且内容是 ISBN/文件名，此时按格式分组更实用（MIME 覆盖率接近 100%）。
+     */
     fun defaultDimension(books: List<OpdsEntry>): GroupDimension {
         val usable = available(books).filter { it != GroupDimension.NONE }
-        return listOf(
-            GroupDimension.TAG,
-            GroupDimension.AUTHOR,
-            GroupDimension.SERIES,
-            GroupDimension.PUBLISHER,
-            GroupDimension.LANGUAGE
-        ).firstOrNull { it in usable } ?: GroupDimension.NONE
+        val preferred = if (GroupDimension.TAG in usable &&
+            coverage(books, GroupDimension.TAG) >= 0.5f
+        ) {
+            listOf(
+                GroupDimension.TAG, GroupDimension.FORMAT, GroupDimension.AUTHOR,
+                GroupDimension.SERIES, GroupDimension.PUBLISHER, GroupDimension.LANGUAGE
+            )
+        } else {
+            listOf(
+                GroupDimension.FORMAT, GroupDimension.AUTHOR, GroupDimension.TAG,
+                GroupDimension.SERIES, GroupDimension.PUBLISHER, GroupDimension.LANGUAGE
+            )
+        }
+        return preferred.firstOrNull { it in usable } ?: GroupDimension.NONE
     }
 }

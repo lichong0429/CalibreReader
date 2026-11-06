@@ -15,7 +15,8 @@ class BookGroupsTest {
         authors: List<String> = emptyList(),
         publisher: String? = null,
         language: String? = null,
-        summary: String? = null
+        summary: String? = null,
+        mime: String = "application/epub+zip"
     ) = OpdsEntry(
         id = id,
         title = id,
@@ -28,7 +29,7 @@ class BookGroupsTest {
             OpdsLink(
                 rel = OpdsRel.ACQUISITION,
                 href = "http://example.test/$id.epub",
-                type = "application/epub+zip"
+                type = mime
             )
         )
     )
@@ -114,5 +115,42 @@ class BookGroupsTest {
         BookGroups.sections(library, GroupDimension.TAG)
         BookGroups.sections(library, GroupDimension.AUTHOR)
         assertEquals(before, library.map { it.title to it.categories })
+    }
+
+    @Test
+    fun `按格式分组把 PDF 与 EPUB 分开`() {
+        val books = listOf(
+            book("p1", mime = "application/pdf"),
+            book("p2", mime = "application/pdf"),
+            book("e1")
+        )
+        val sections = BookGroups.sections(books, GroupDimension.FORMAT)
+        assertEquals(listOf("EPUB", "PDF"), sections.map { it.name })
+        assertEquals(2, sections[1].books.size)
+        assertTrue(GroupDimension.FORMAT in BookGroups.available(books))
+    }
+
+    /** 真实库 60 本里只有 6 本有标签，且标签是 ISBN/文件名，不该默认按它分 */
+    @Test
+    fun `标签覆盖率过低时默认改为按格式分组`() {
+        val books = listOf(
+            book("p1", tags = listOf("9780470516188"), mime = "application/pdf"),
+            book("p2", mime = "application/pdf"),
+            book("p3", mime = "application/pdf"),
+            book("e1", mime = "application/epub+zip"),
+            book("t1", mime = "text/plain")
+        )
+        assertEquals(0.2f, BookGroups.coverage(books, GroupDimension.TAG), 0.001f)
+        assertEquals(GroupDimension.FORMAT, BookGroups.defaultDimension(books))
+    }
+
+    @Test
+    fun `标签覆盖率足够时仍默认按标签`() {
+        val books = listOf(
+            book("a", tags = listOf("MOF"), mime = "application/pdf"),
+            book("b", tags = listOf("MOF"), mime = "application/epub+zip"),
+            book("c", tags = listOf("膜分离"), mime = "application/pdf")
+        )
+        assertEquals(GroupDimension.TAG, BookGroups.defaultDimension(books))
     }
 }

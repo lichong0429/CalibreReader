@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -343,6 +344,14 @@ fun ServerEditDialog(
     var errMessage by remember { mutableStateOf<String?>(null) }
     var probeJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+    val formScroll = rememberScrollState()
+    // 连接结果在滚动区底部，出现后自动滚过去，否则点了「测试连接」看不到结论
+    LaunchedEffect(okMessage, errMessage) {
+        if (okMessage != null || errMessage != null) {
+            androidx.compose.runtime.withFrameNanos { }
+            formScroll.animateScrollTo(formScroll.maxValue)
+        }
+    }
 
     fun buildDraft(): ServerConfig = (initial ?: ServerProbe.newDraft()).copy(
         baseUrl = baseUrl.trim(),
@@ -414,8 +423,14 @@ fun ServerEditDialog(
                 Modifier
                     .padding(20.dp)
                     .heightIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState())
             ) {
+                // 表单区可滚动，按钮行固定在外层：否则「连接成功」提示会把保存按钮挤出可视区
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(formScroll)
+                ) {
                 Text(
                     if (initial == null) "添加服务器" else "编辑服务器",
                     style = MaterialTheme.typography.titleLarge,
@@ -503,6 +518,8 @@ fun ServerEditDialog(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+
+                } // 表单滚动区结束
 
                 Spacer(Modifier.height(18.dp))
                 HorizontalDivider()

@@ -21,7 +21,7 @@ object OpdsParser {
     private const val MAX_BYTES = 16 * 1024 * 1024
 
     fun parse(input: InputStream, baseUrl: String): OpdsFeed {
-        val bytes = sanitize(readLimited(input))
+        val bytes = sanitize(stripInvalidXmlChars(readLimited(input)))
         if (bytes.isEmpty()) throw OpdsParseException("服务端返回空内容")
 
         val doc = try {
@@ -231,6 +231,29 @@ object OpdsParser {
                 if (total > limit) throw OpdsParseException("响应超过 ${limit / 1024 / 1024}MB 上限")
                 out.write(buf, 0, n)
             }
+        }
+        return out.toByteArray()
+    }
+
+    /**
+     * Calibre-Web 会把书库里残留的 C0 控制字符（\u0000 / \u0007 等）原样写进 feed。
+     * XML 1.0 不允许这些字符，DOM 会抛 SAXParseException 导致整页书库打不开。
+     * UTF-8 续字节都 >= 0x80，按字节剔除不会破坏多字节中文。
+     */
+    private fun stripInvalidXmlChars(bytes: ByteArray): ByteArray {
+        var dirty = false
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            if (v < 0x20 && v != 0x09 && v != 0x0A && v != 0x0D) {
+                dirty = true
+                break
+            }
+        }
+        if (!dirty) return bytes
+        val out = ByteArrayOutputStream(bytes.size)
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            if (v >= 0x20 || v == 0x09 || v == 0x0A || v == 0x0D) out.write(v)
         }
         return out.toByteArray()
     }
