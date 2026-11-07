@@ -3,6 +3,8 @@ package com.lichong.calibrereader.ui.reader
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -18,16 +20,23 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.lichong.calibrereader.CalibreApp
 import com.lichong.calibrereader.R
+import com.lichong.calibrereader.data.db.AnnotationEntity
 import com.lichong.calibrereader.data.db.BookEntity
 import com.lichong.calibrereader.data.model.ServerConfig
 import com.lichong.calibrereader.data.sync.ReadStatus
 import com.lichong.calibrereader.ui.theme.CalibreTheme
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.readium.r2.navigator.Navigator
+import org.readium.r2.navigator.DecorableNavigator
+import org.readium.r2.navigator.Decoration
 import org.readium.r2.navigator.OverflowableNavigator
+import org.readium.r2.navigator.SelectableNavigator
+import org.readium.r2.navigator.input.DragEvent
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
@@ -39,6 +48,20 @@ import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.publication.services.locateProgression
 import java.io.File
+import java.util.UUID
+
+/** 高亮色（ARGB，带透明度） */
+object HighlightColors {
+    val YELLOW = 0x66FFD54FL
+    val GREEN = 0x6680CBC4L
+    val BLUE = 0x6690CAF9L
+    val PINK = 0x66F48FB1L
+
+    val all = listOf(YELLOW, GREEN, BLUE, PINK)
+}
+
+/** 用户当前选中的那段文字 */
+data class SelectionInfo(val locatorJson: String, val text: String)
 
 data class TocItem(
     val title: String,
@@ -59,7 +82,14 @@ data class ReaderUiState(
     val chromeVisible: Boolean = true,
     val syncNote: String? = null,
     val message: String? = null,
-    val attached: Boolean = false
+    val attached: Boolean = false,
+    /** 本书全部划线/批注 */
+    val annotations: List<AnnotationEntity> = emptyList(),
+    /** 当前选中的文字，非空时底部弹出操作条 */
+    val selection: SelectionInfo? = null,
+    /** 正在编辑的批注（点击已有高亮） */
+    val editingAnnotation: AnnotationEntity? = null,
+    val showAnnotationList: Boolean = false
 )
 
 @OptIn(ExperimentalReadiumApi::class)
@@ -70,6 +100,7 @@ class ReaderActivity : AppCompatActivity() {
         private const val TAG_NAV = "epub_navigator"
         private const val LOCAL_SAVE_INTERVAL = 3_000L
         private const val REMOTE_PUSH_INTERVAL = 45_000L
+        private const val ANNOTATION_GROUP = "annotations"
 
         fun newIntent(context: Context, bookId: String): Intent =
             Intent(context, ReaderActivity::class.java).putExtra(EXTRA_BOOK_ID, bookId)
@@ -90,6 +121,10 @@ class ReaderActivity : AppCompatActivity() {
     private var currentLocator: Locator? = null
     /** 容器尚未创建时暂存待挂载参数 */
     private var pendingNav: Pair<Publication, Locator?>? = null
+
+    private val selectionHandler = Handler(Looper.getMainLooper())
+    private val selectionProbe = Runnable { checkSelection() }
+    private var selectionWatcher: Job? = null
 
     private val navigator: EpubNavigatorFragment?
         get() = supportFragmentManager.findFragmentByTag(TAG_NAV) as? EpubNavigatorFragment
@@ -131,6 +166,21 @@ class ReaderActivity : AppCompatActivity() {
                     },
                     onSyncNow = { manualSync() },
                     onClearMessage = { ui = ui.copy(message = null) },
+                    onSaveAnnotation = { color, note -> saveAnnotation(color, note) },
+                    onUpdateAnnotation = { updateAnnotation(it) },
+                    onDeleteAnnotation = { deleteAnnotation(it) },
+                    onDismissSelection = {
+                        ui = ui.copy(selection = null)
+                        runCatching { (navigator as? SelectableNavigator)?.clearSelection() }
+                    },
+                    onShowAnnotationList = { show -> ui = ui.copy(showAnnotationList = show) },
+                    onCloseAnnotationEditor = { ui = ui.copy(editingAnnotation = null) },
+                    onJumpToAnnotation = { ann ->
+                        runCatching { Locator.fromJSON(JSONObject(ann.locatorJson)) }
+                            .getOrNull()
+                            ?.let { navigator?.go(it, animated = false) }
+                        ui = ui.copy(showAnnotationList = false)
+                    },
                     onNavigatorHostReady = { attachNavigatorIfPossible() }
                 )
             }
@@ -179,6 +229,7 @@ class ReaderActivity : AppCompatActivity() {
             syncNote = syncDescription()
         )
         attachNavigatorIfPossible()
+        loadAnnotations()
     }
 
     /** 本地优先；本地明显落后于服务端时改用服务端进度 */
@@ -254,9 +305,145 @@ class ReaderActivity : AppCompatActivity() {
         supportFragmentManager.executePendingTransactions()
         ui = ui.copy(attached = true)
         registerTapListener()
+        registerDecorationListener()
         observeProgress()
+        startSelectionWatcher()
         // 首屏渲染后再注入一次，避免刚 attach 时页面还没就绪
         window.decorView.postDelayed({ applyReaderCss() }, 600)
+    }
+
+    // ---------- 划线 / 批注 ----------
+
+    private fun loadAnnotations() {
+        val b = book ?: return
+        container.appScope.launch {
+            val list = runCatching { container.database.annotationDao().listByBook(b.id) }
+                .getOrDefault(emptyList())
+            runOnUiThread {
+                ui = ui.copy(annotations = list)
+                applyDecorations()
+            }
+        }
+    }
+
+    /** 把已有批注画到正文上 */
+    private fun applyDecorations() {
+        val nav = navigator as? DecorableNavigator ?: return
+        val decorations = ui.annotations.mapNotNull { item ->
+            val locator = runCatching { Locator.fromJSON(JSONObject(item.locatorJson)) }
+                .getOrNull() ?: return@mapNotNull null
+            Decoration(
+                id = item.id,
+                locator = locator,
+                style = Decoration.Style.Highlight(item.color.toInt(), isActive = false)
+            )
+        }
+        lifecycleScope.launch {
+            runCatching { nav.applyDecorations(decorations, ANNOTATION_GROUP) }
+        }
+    }
+
+    private fun registerDecorationListener() {
+        val nav = navigator as? DecorableNavigator ?: return
+        nav.addDecorationListener(ANNOTATION_GROUP, object : DecorableNavigator.Listener {
+            override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
+                val hit = ui.annotations.firstOrNull { it.id == event.decoration.id } ?: return false
+                ui = ui.copy(editingAnnotation = hit)
+                return true
+            }
+        })
+    }
+
+    /** Readium 3.1.2 没有选区变化回调，只能轮询 */
+    private fun checkSelection() {
+        val nav = navigator as? SelectableNavigator ?: return
+        lifecycleScope.launch {
+            val selection = runCatching { nav.currentSelection() }.getOrNull()
+            if (selection != null) {
+                val t = selection.locator.text
+                android.util.Log.d(
+                    "CalibreReader",
+                    "selection: highlight=${t.highlight?.take(24)} after=${t.after?.take(16)}"
+                )
+            }
+            val info = selection?.let { sel ->
+                val t = sel.locator.text
+                // 有些 EPUB 只回 after/before，highlight 为空，这里做兜底
+                val label = t.highlight?.takeIf { it.isNotBlank() }
+                    ?: t.after?.trim()?.take(40)?.takeIf { it.isNotBlank() }
+                    ?: "已选中内容"
+                SelectionInfo(sel.locator.toJSON().toString(), label)
+            }
+            if (info != ui.selection) ui = ui.copy(selection = info)
+        }
+    }
+
+    /**
+     * 轮询当前选区：Readium 3.1.2 既不提供选区变化回调，
+     * 手势事件也无法稳定捕获 WebView 原生选区，只能轻量轮询。
+     */
+    private fun startSelectionWatcher() {
+        if (selectionWatcher != null) return
+        selectionWatcher = lifecycleScope.launch {
+            while (isActive) {
+                checkSelection()
+                delay(600)
+            }
+        }
+    }
+
+    private fun saveAnnotation(color: Long, note: String?) {
+        val b = book ?: return
+        val sel = ui.selection ?: return
+        val now = System.currentTimeMillis()
+        val entity = AnnotationEntity(
+            id = UUID.randomUUID().toString(),
+            bookId = b.id,
+            locatorJson = sel.locatorJson,
+            selectedText = sel.text.take(2000),
+            note = note?.trim()?.takeIf { it.isNotEmpty() },
+            color = color,
+            chapterTitle = currentLocator?.title,
+            createdAt = now,
+            updatedAt = now
+        )
+        persistAnnotation(entity) { if (entity.hasNote) "已添加批注" else "已添加划线" }
+    }
+
+    private fun updateAnnotation(entity: AnnotationEntity) {
+        persistAnnotation(entity.copy(updatedAt = System.currentTimeMillis())) { "已更新批注" }
+    }
+
+    private fun deleteAnnotation(entity: AnnotationEntity) {
+        val b = book ?: return
+        container.appScope.launch {
+            runCatching { container.database.annotationDao().deleteById(entity.id) }
+            val list = runCatching { container.database.annotationDao().listByBook(b.id) }
+                .getOrDefault(emptyList())
+            runOnUiThread {
+                ui = ui.copy(annotations = list, editingAnnotation = null, message = "已删除")
+                applyDecorations()
+            }
+        }
+    }
+
+    private fun persistAnnotation(entity: AnnotationEntity, done: () -> String) {
+        val b = book ?: return
+        container.appScope.launch {
+            val ok = runCatching { container.database.annotationDao().upsert(entity) }.isSuccess
+            val list = runCatching { container.database.annotationDao().listByBook(b.id) }
+                .getOrDefault(emptyList())
+            runOnUiThread {
+                ui = ui.copy(
+                    annotations = list,
+                    selection = null,
+                    editingAnnotation = null,
+                    message = if (ok) done() else "保存失败"
+                )
+                applyDecorations()
+            }
+            runCatching { (navigator as? SelectableNavigator)?.clearSelection() }
+        }
     }
 
     /**
@@ -296,6 +483,8 @@ class ReaderActivity : AppCompatActivity() {
         val nav = visualNavigator ?: return
         nav.addInputListener(object : InputListener {
             override fun onTap(event: TapEvent): Boolean {
+                // 有选区时别抢事件，让 WebView 自己处理“点空白取消选中”
+                if (ui.selection != null) return false
                 val widthPx = window.decorView.width
                 if (widthPx <= 0) return false
                 val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
@@ -305,6 +494,13 @@ class ReaderActivity : AppCompatActivity() {
                     toggleChrome()
                     return true
                 }
+                return false
+            }
+
+            override fun onDrag(event: DragEvent): Boolean {
+                // 拖选手指抬起后探一次选区
+                selectionHandler.removeCallbacks(selectionProbe)
+                selectionHandler.postDelayed(selectionProbe, 400)
                 return false
             }
         })
@@ -419,6 +615,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         progressJob?.cancel()
+        selectionWatcher?.cancel()
         super.onDestroy()
     }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -69,10 +70,57 @@ interface BookDao {
     suspend fun saveProgress(id: String, progress: Float, locator: String?, ts: Long)
 }
 
-@Database(entities = [BookEntity::class], version = 2, exportSchema = true)
+/**
+ * 阅读批注 / 划线。
+ *
+ * locatorJson 是 Readium 的 Locator JSON，翻页或换字号后仍能重新定位；
+ * selectedText 存一份原文快照，方便批注列表里展示，即使 EPUB 内容变了也能看懂。
+ */
+@Entity(tableName = "annotations", indices = [Index("bookId")])
+data class AnnotationEntity(
+    @PrimaryKey val id: String,
+    val bookId: String,
+    val locatorJson: String,
+    val selectedText: String = "",
+    /** 批注内容；null 表示只有划线没有文字 */
+    val note: String? = null,
+    /** ARGB 颜色 */
+    val color: Long = 0x66FFD54F,
+    val chapterTitle: String? = null,
+    val createdAt: Long = 0,
+    val updatedAt: Long = 0
+) {
+    val hasNote: Boolean get() = !note.isNullOrBlank()
+}
+
+@Dao
+interface AnnotationDao {
+
+    @Query("SELECT * FROM annotations WHERE bookId = :bookId ORDER BY createdAt DESC")
+    fun observeByBook(bookId: String): Flow<List<AnnotationEntity>>
+
+    @Query("SELECT * FROM annotations WHERE bookId = :bookId ORDER BY createdAt DESC")
+    suspend fun listByBook(bookId: String): List<AnnotationEntity>
+
+    @Query("SELECT * FROM annotations WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): AnnotationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: AnnotationEntity)
+
+    @Query("DELETE FROM annotations WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM annotations WHERE bookId = :bookId")
+    suspend fun deleteByBook(bookId: String)
+}
+
+@Database(entities = [BookEntity::class, AnnotationEntity::class], version = 3, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun bookDao(): BookDao
+
+    abstract fun annotationDao(): AnnotationDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -81,9 +129,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `annotations` (" +
+                        "`id` TEXT NOT NULL, `bookId` TEXT NOT NULL, `locatorJson` TEXT NOT NULL, " +
+                        "`selectedText` TEXT NOT NULL, `note` TEXT, `color` INTEGER NOT NULL, " +
+                        "`chapterTitle` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_annotations_bookId` ON `annotations` (`bookId`)"
+                )
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "calibre_reader.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigration()
                 .build()
     }

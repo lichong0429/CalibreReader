@@ -1,6 +1,7 @@
 package com.lichong.calibrereader.ui.reader
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,15 +21,20 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -37,6 +43,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -51,18 +58,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentContainerView
 import com.lichong.calibrereader.R
+import com.lichong.calibrereader.data.db.AnnotationEntity
 import com.lichong.calibrereader.ui.LoadingBox
 import com.lichong.calibrereader.ui.MessageState
 import com.lichong.calibrereader.ui.SectionTitle
 import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.TextAlign
 import org.readium.r2.navigator.preferences.Theme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -77,6 +90,13 @@ fun ReaderScreen(
     onPrefsChange: (ReaderPrefs) -> Unit,
     onSyncNow: () -> Unit,
     onClearMessage: () -> Unit,
+    onSaveAnnotation: (Long, String?) -> Unit,
+    onUpdateAnnotation: (AnnotationEntity) -> Unit,
+    onDeleteAnnotation: (AnnotationEntity) -> Unit,
+    onDismissSelection: () -> Unit,
+    onCloseAnnotationEditor: () -> Unit,
+    onShowAnnotationList: (Boolean) -> Unit,
+    onJumpToAnnotation: (AnnotationEntity) -> Unit,
     onNavigatorHostReady: () -> Unit = {}
 ) {
     var showToc by remember { mutableStateOf(false) }
@@ -119,6 +139,9 @@ fun ReaderScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { onShowAnnotationList(true) }) {
+                            Icon(Icons.Default.Edit, contentDescription = "批注")
+                        }
                         IconButton(onClick = { showToc = state.toc.isNotEmpty() }) {
                             Icon(Icons.Default.List, contentDescription = "目录")
                         }
@@ -180,6 +203,16 @@ fun ReaderScreen(
                     .clickable { onToggleChrome() }
             )
         }
+
+        // 选中文字后，底部弹出划线 / 批注操作条
+        if (state.selection != null) {
+            SelectionBar(
+                selection = state.selection,
+                onSave = { color, note -> onSaveAnnotation(color, note) },
+                onDismiss = onDismissSelection,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
+            )
+        }
     }
 
     if (showToc) {
@@ -200,6 +233,25 @@ fun ReaderScreen(
                 prefs = state.prefs,
                 onChange = onPrefsChange,
                 onClose = { showSettings = false }
+            )
+        }
+    }
+
+    if (state.editingAnnotation != null) {
+        AnnotationEditorDialog(
+            annotation = state.editingAnnotation,
+            onSave = { onUpdateAnnotation(it) },
+            onDelete = { onDeleteAnnotation(it) },
+            onDismiss = onCloseAnnotationEditor
+        )
+    }
+
+    if (state.showAnnotationList) {
+        ModalBottomSheet(onDismissRequest = { onShowAnnotationList(false) }, sheetState = sheetState) {
+            AnnotationListSheet(
+                annotations = state.annotations,
+                onJump = { onJumpToAnnotation(it) },
+                onDelete = { onDeleteAnnotation(it) }
             )
         }
     }
@@ -565,3 +617,221 @@ private fun SettingSwitch(
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }
+
+// ---------------- 划线 / 批注 ----------------
+
+/** 选中文字后弹出的底部操作条：选颜色 + 直接写批注 */
+@Composable
+private fun SelectionBar(
+    selection: SelectionInfo,
+    onSave: (Long, String?) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var color by remember(selection.locatorJson) { mutableStateOf(HighlightColors.YELLOW) }
+    var note by remember(selection.locatorJson) { mutableStateOf("") }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 4.dp,
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(
+                "「${selection.text.take(90)}」",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HighlightColors.all.forEach { c ->
+                    ColorDot(selected = color == c, color = c) { color = c }
+                    Spacer(Modifier.width(8.dp))
+                }
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    placeholder = { Text("写批注…") },
+                    modifier = Modifier.weight(1f),
+                    maxLines = 3,
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) { Text("取消") }
+                Button(onClick = { onSave(color, note.trim().takeIf { it.isNotEmpty() }) }) {
+                    Text(if (note.isBlank()) "划线" else "保存批注")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorDot(selected: Boolean, color: Long, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(if (selected) 30.dp else 24.dp)
+            .clip(CircleShape)
+            .background(Color(color.toInt()))
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant
+                },
+                shape = CircleShape
+            )
+            .clickable(onClick = onClick)
+    )
+}
+
+/** 点击已有高亮时弹出：改颜色 / 改批注 / 删除 */
+@Composable
+private fun AnnotationEditorDialog(
+    annotation: AnnotationEntity,
+    onSave: (AnnotationEntity) -> Unit,
+    onDelete: (AnnotationEntity) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var note by remember(annotation.id) { mutableStateOf(annotation.note.orEmpty()) }
+    var color by remember(annotation.id) { mutableStateOf(annotation.color) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("批注") },
+        text = {
+            Column {
+                Text(
+                    "「${annotation.selectedText.take(120)}」",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    HighlightColors.all.forEach { c ->
+                        ColorDot(selected = color == c, color = c) { color = c }
+                        Spacer(Modifier.width(8.dp))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    placeholder = { Text("写下你的想法…") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 5
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onSave(
+                    annotation.copy(
+                        note = note.trim().takeIf { it.isNotEmpty() },
+                        color = color
+                    )
+                )
+            }) { Text("保存") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onDelete(annotation) }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            }
+        }
+    )
+}
+
+/** 本书全部划线 / 批注列表 */
+@Composable
+private fun AnnotationListSheet(
+    annotations: List<AnnotationEntity>,
+    onJump: (AnnotationEntity) -> Unit,
+    onDelete: (AnnotationEntity) -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 20.dp)) {
+        Text(
+            if (annotations.isEmpty()) "划线 / 批注" else "划线 / 批注（${annotations.size}）",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(10.dp))
+
+        if (annotations.isEmpty()) {
+            Text(
+                "长按正文选中文字，就能划线或写批注；点已有高亮可以改颜色、补批注。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(24.dp))
+            return@Column
+        }
+
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
+            items(annotations, key = { it.id }) { item ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onJump(item) }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Box(
+                        Modifier
+                            .width(4.dp)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color(item.color.toInt()))
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            item.selectedText,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (item.hasNote) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                item.note.orEmpty(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            formatTime(item.createdAt),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = { onDelete(item) }, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "删除",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+private fun formatTime(ts: Long): String =
+    if (ts <= 0) "" else SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(ts))
