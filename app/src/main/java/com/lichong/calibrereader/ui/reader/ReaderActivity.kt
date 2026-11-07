@@ -7,6 +7,9 @@ import android.os.SystemClock
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -28,6 +31,8 @@ import org.readium.r2.navigator.OverflowableNavigator
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
+import org.readium.r2.navigator.input.InputListener
+import org.readium.r2.navigator.input.TapEvent
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
@@ -35,7 +40,13 @@ import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.publication.services.locateProgression
 import java.io.File
 
-data class TocItem(val title: String, val level: Int, val link: Link)
+data class TocItem(
+    val title: String,
+    val level: Int,
+    val link: Link,
+    /** 下一项层级更深，说明有子目录，可以在目录面板里折叠 */
+    val hasChildren: Boolean = false
+)
 
 data class ReaderUiState(
     val loading: Boolean = true,
@@ -107,7 +118,7 @@ class ReaderActivity : AppCompatActivity() {
                 ReaderScreen(
                     state = ui,
                     onBack = { finish() },
-                    onToggleChrome = { ui = ui.copy(chromeVisible = !ui.chromeVisible) },
+                    onToggleChrome = { toggleChrome() },
                     onGoTo = { item -> item?.let { navigator?.go(it.link, animated = false) } },
                     onNext = { visualNavigator?.goForward(animated = true) },
                     onPrev = { visualNavigator?.goBackward(animated = true) },
@@ -116,6 +127,7 @@ class ReaderActivity : AppCompatActivity() {
                         prefs.save(this)
                         ui = ui.copy(prefs = updated)
                         navigator?.submitPreferences(updated.toEpubPreferences())
+                        applyReaderCss()
                     },
                     onSyncNow = { manualSync() },
                     onClearMessage = { ui = ui.copy(message = null) },
@@ -208,15 +220,19 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun buildToc(pub: Publication): List<TocItem> {
-        val out = mutableListOf<TocItem>()
+        val raw = mutableListOf<Triple<String, Int, Link>>()
         fun walk(links: List<Link>, level: Int) {
             for (link in links) {
-                out.add(TocItem(link.title.orEmpty().ifBlank { "未命名章节" }, level, link))
-                if (link.children.isNotEmpty() && level < 4) walk(link.children, level + 1)
+                raw.add(Triple(link.title.orEmpty().ifBlank { "未命名章节" }, level, link))
+                if (link.children.isNotEmpty() && level < 6) walk(link.children, level + 1)
             }
         }
         walk(pub.manifest.tableOfContents, 0)
-        return out
+        // 子项是紧随其后、层级更深的那些项；用于目录面板的展开/收起
+        return raw.mapIndexed { i, (title, level, link) ->
+            val hasChild = i + 1 < raw.size && raw[i + 1].second > level
+            TocItem(title, level, link, hasChild)
+        }
     }
 
     private fun attachNavigatorIfPossible() {
@@ -237,7 +253,61 @@ class ReaderActivity : AppCompatActivity() {
         }
         supportFragmentManager.executePendingTransactions()
         ui = ui.copy(attached = true)
+        registerTapListener()
         observeProgress()
+        // 首屏渲染后再注入一次，避免刚 attach 时页面还没就绪
+        window.decorView.postDelayed({ applyReaderCss() }, 600)
+    }
+
+    /**
+     * Readium 3.1.2 的 EpubPreferences.fontSize 不会写成 --USER__fontSize（传 typeScale 又会被放大 100 倍），
+     * 所以字号靠直接注入 CSS 变量实现；翻页后 WebView 换了页面，需要重新注入。
+     */
+    private fun applyReaderCss() {
+        val nav = navigator ?: return
+        val pct = prefs.fontSize.toInt().coerceIn(50, 300)
+        val script = "(function(){var r=document.documentElement;" +
+            "r.style.setProperty('--USER__fontSize','" + pct + "%','important');})();"
+        lifecycleScope.launch {
+            runCatching { nav.evaluateJavascript(script) }
+        }
+    }
+
+    private fun toggleChrome() {
+        val visible = !ui.chromeVisible
+        ui = ui.copy(chromeVisible = visible)
+        applyImmersive(visible)
+    }
+
+    /** 全屏：隐藏状态栏与导航栏；从边缘下滑可临时唤出 */
+    private fun applyImmersive(chromeVisible: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView) ?: return
+        if (chromeVisible) {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    /** 点页面中间 1/3 切换工具栏；左右两侧仍交给 Readium 翻页 */
+    private fun registerTapListener() {
+        val nav = visualNavigator ?: return
+        nav.addInputListener(object : InputListener {
+            override fun onTap(event: TapEvent): Boolean {
+                val widthPx = window.decorView.width
+                if (widthPx <= 0) return false
+                val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+                val widthDp = widthPx / density
+                val x = event.point.x
+                if (x > widthDp / 3f && x < widthDp * 2f / 3f) {
+                    toggleChrome()
+                    return true
+                }
+                return false
+            }
+        })
     }
 
     private fun observeProgress() {
@@ -248,6 +318,8 @@ class ReaderActivity : AppCompatActivity() {
                 currentLocator = locator
                 val percent = percentOf(locator)
                 ui = ui.copy(progress = percent)
+                // 翻页会换 WebView 页面，字号变量要重新注入
+                applyReaderCss()
 
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastLocalSave > LOCAL_SAVE_INTERVAL) {
@@ -328,6 +400,12 @@ class ReaderActivity : AppCompatActivity() {
             b.koboUuid == null -> "服务端未提供 uuid，进度仅保存在本机"
             else -> "进度同步至 ${srv.displayName}"
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 回到前台时按当前状态同步一次系统栏，避免「工具栏显示了但状态栏还藏着」
+        window.decorView.post { applyImmersive(ui.chromeVisible) }
     }
 
     override fun onStop() {
